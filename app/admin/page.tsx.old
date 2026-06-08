@@ -1,0 +1,574 @@
+'use client'
+
+import { createClient } from '@/lib/supabase/client'
+import { useEffect, useState, useCallback } from 'react'
+import Image from 'next/image'
+
+const supabase = createClient()
+
+// --- TYPES ---
+type Profile = {
+  id: string
+  first_name: string
+  last_name: string
+  subscription_type: string
+  sessions_left: number
+  role: string
+  is_minor: boolean
+}
+
+type Creation = {
+  id: string
+  piece_name: string | null
+  weight_kg: number
+  firing_passes: number
+  cost: number
+  created_at: string
+}
+
+type Paiement = {
+  id: string
+  montant: number
+  date_paiement: string
+  mode: string
+  note: string | null
+}
+
+type Prices = {
+  tarif_annuel_adulte: number
+  tarif_annuel_enfant: number
+  tarif_3_seances_adulte: number
+  tarif_3_seances_enfant: number
+  tarif_5_seances_adulte: number
+  tarif_5_seances_enfant: number
+  tarif_10_seances_adulte: number
+  tarif_10_seances_enfant: number
+}
+
+export default function AdminPage() {
+  const [profiles, setProfiles] = useState<Profile[]>([])
+  const [prices, setPrices] = useState<Prices | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [searchTerm, setSearchTerm] = useState('')
+
+  // Élève sélectionné
+  const [selectedStudent, setSelectedStudent] = useState<Profile | null>(null)
+  const [creations, setCreations] = useState<Creation[]>([])
+  const [paiements, setPaiements] = useState<Paiement[]>([])
+
+  // Formulaires
+  const [newCreation, setNewCreation] = useState({ piece_name: '', weight_kg: '', firing_passes: 1 })
+  const [newPaiement, setNewPaiement] = useState({ montant: '', date_paiement: new Date().toISOString().split('T')[0], mode: 'especes', note: '' })
+  const [editSubscription, setEditSubscription] = useState<string>('')
+  const [editSessionsLeft, setEditSessionsLeft] = useState<number>(0)
+  const [saving, setSaving] = useState(false)
+    const [creneauxList, setCreneauxList] = useState<any[]>([])
+  const [isAdmin, setIsAdmin] = useState(false)
+    const [generating, setGenerating] = useState(false)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [errorLogin, setErrorLogin] = useState('')
+  const [activeTab, setActiveTab] = useState<'eleves' | 'planning'>('eleves')
+  const [planningSessions, setPlanningSessions] = useState<any[]>([])
+
+  // --- FETCH DATA ---
+  const fetchStudents = useCallback(async () => {
+    const { data } = await supabase.from('profiles').select('*').eq('role', 'eleve').order('last_name')
+    if (data) setProfiles(data)
+  }, [])
+
+  const fetchPrices = useCallback(async () => {
+    const { data } = await supabase.from('parametres').select('*').eq('id', 1).single()
+    if (data) setPrices(data)
+  }, []) // <-- CORRIGÉ ICI : ajout de la fermeture du useCallback
+
+  const fetchPlanning = async () => {
+    const today = new Date().toISOString().split('T')[0]
+    const { data } = await supabase
+    .from('sessions')
+    .select(`
+    id, session_date, creneau_id, annulee,
+    creneaux ( jour, heure_debut, heure_fin, capacite_max, public_cible ),
+            bookings ( profile_id, status, profiles ( first_name, last_name ) )
+            `)
+    .gte('session_date', today)
+    .order('session_date', { ascending: true })
+    //.limit(20)
+    if (data) setPlanningSessions(data)
+  } // <-- CORRIGÉ ICI : supprimé le ", []" en trop
+
+    useEffect(() => {
+    const init = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+        if (data?.role === 'admin') {
+          setIsAdmin(true)
+          await fetchStudents()
+          await fetchPrices()
+          await fetchPlanning()
+          const { data: creneauxData } = await supabase.from('creneaux').select('*')
+          if (creneauxData) setCreneauxList(creneauxData)
+        }
+      }
+      setLoading(false)
+    }
+    init()
+  }, [fetchStudents, fetchPrices])
+
+    // --- FONCTION DE CONNEXION ADMIN ---
+    const handleLogin = async (e: React.FormEvent) => {
+      e.preventDefault()
+      setErrorLogin('')
+      const { error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) {
+        setErrorLogin(error.message)
+      } else {
+        setLoading(true)
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { data } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+          if (data?.role === 'admin') {
+            setIsAdmin(true)
+            await fetchStudents()
+            await fetchPrices()
+          } else {
+            setErrorLogin("Accès refusé. Vous n'êtes pas administrateur.")
+            await supabase.auth.signOut()
+          }
+        }
+        setLoading(false)
+      }
+    }
+
+
+  const selectStudent = async (student: Profile) => {
+    setSelectedStudent(student)
+    setEditSubscription(student.subscription_type)
+    setEditSessionsLeft(student.sessions_left)
+
+    // Récupérer créations et paiements
+    const { data: cData } = await supabase.from('creations').select('*').eq('profile_id', student.id).order('created_at', { ascending: false })
+    if (cData) setCreations(cData)
+
+      const { data: pData } = await supabase.from('paiements').select('*').eq('profile_id', student.id).order('date_paiement', { ascending: false })
+      if (pData) setPaiements(pData)
+
+        // Rafraîchir les données de l'élève pour avoir le vrai compteur
+        const { data: freshProfile } = await supabase.from('profiles').select('*').eq('id', student.id).single()
+        if (freshProfile) {
+          setSelectedStudent(freshProfile as Profile)
+          setEditSubscription(freshProfile.subscription_type)
+          setEditSessionsLeft(freshProfile.sessions_left)
+        }
+  }
+
+  // --- ACTIONS ---
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    window.location.href = '/dashboard'
+  }
+  const handleGenerateYear = async () => {
+    if (!confirm("Cela va générer toutes les séances de l'année scolaire (Septembre à Juin). Continuer ?")) return
+
+      setGenerating(true)
+      const { data, error } = await supabase.rpc('generate_yearly_sessions')
+
+      if (error) {
+        alert("Erreur lors de la génération : " + error.message)
+      } else if (data) {
+        alert(`✨ ${data.message} (${data.count} nouvelles séances créées).`)
+        await fetchPlanning() // On rafraîchit la liste du planning
+      }
+      setGenerating(false)
+  }
+
+  const handleUpdateSubscription = async () => {
+    if (!selectedStudent) return
+      setSaving(true)
+
+      const { error } = await supabase.rpc('update_student_subscription', {
+        target_user_id: selectedStudent.id,
+        new_sub_type: editSubscription,
+        new_sessions: editSessionsLeft
+      })
+
+      if (!error) {
+        setSelectedStudent({ ...selectedStudent, subscription_type: editSubscription, sessions_left: editSessionsLeft })
+        setProfiles(profiles.map(p => p.id === selectedStudent.id ? { ...p, subscription_type: editSubscription, sessions_left: editSessionsLeft } : p))
+        alert('Forfait mis à jour avec succès !')
+      } else {
+        alert('Erreur: ' + error.message)
+      }
+      setSaving(false)
+  }
+
+  const handleAddCreation = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedStudent || !newCreation.weight_kg) return
+      setSaving(true)
+
+      const { data, error } = await supabase
+      .from('creations')
+      .insert({
+        profile_id: selectedStudent.id,
+        piece_name: newCreation.piece_name || null,
+        weight_kg: parseFloat(newCreation.weight_kg),
+              firing_passes: newCreation.firing_passes
+      })
+      .select()
+      .single()
+
+      if (!error && data) {
+        setCreations([data, ...creations])
+        setNewCreation({ piece_name: '', weight_kg: '', firing_passes: 1 })
+      } else {
+        alert('Erreur: ' + error?.message)
+      }
+      setSaving(false)
+  }
+
+  const handleAddPaiement = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedStudent || !newPaiement.montant) return
+      setSaving(true)
+
+      const { data, error } = await supabase
+      .from('paiements')
+      .insert({
+        profile_id: selectedStudent.id,
+        montant: parseFloat(newPaiement.montant),
+              date_paiement: newPaiement.date_paiement,
+              mode: newPaiement.mode,
+              note: newPaiement.note || null
+      })
+      .select()
+      .single()
+
+      if (!error && data) {
+        setPaiements([data, ...paiements])
+        setNewPaiement({ ...newPaiement, montant: '', note: '' })
+      } else {
+        alert('Erreur: ' + error?.message)
+      }
+      setSaving(false)
+  }
+
+  const handleResetPassword = async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/dashboard`
+    })
+    if (!error) {
+      alert(`Un email de réinitialisation a été envoyé à ${email}`)
+    } else {
+      alert("Erreur : " + error.message)
+    }
+  }
+
+  // --- CALCULS FINANCIERS ---
+  const totalCreations = creations.reduce((sum, c) => sum + c.cost, 0)
+  const totalPaiements = paiements.reduce((sum, p) => sum + p.montant, 0)
+
+  const getSubscriptionPrice = () => {
+    if (!prices || !selectedStudent) return 0
+      const isMinor = selectedStudent.is_minor
+      switch (selectedStudent.subscription_type) {
+        case 'annuel': return isMinor ? prices.tarif_annuel_enfant : prices.tarif_annuel_adulte
+        case '3_seances': return isMinor ? prices.tarif_3_seances_enfant : prices.tarif_3_seances_adulte
+        case '5_seances': return isMinor ? prices.tarif_5_seances_enfant : prices.tarif_5_seances_adulte
+        case '10_seances': return isMinor ? prices.tarif_10_seances_enfant : prices.tarif_10_seances_adulte
+        default: return 0
+      }
+  }
+  const getCreneauName = (creneauId: string | null | undefined) => {
+    if (!creneauId) return ''
+      const creneau = creneauxList.find(c => c.id === creneauId)
+      return creneau ? `(${creneau.jour} ${creneau.heure_debut.substring(0,5)})` : ''
+  }
+  const soldeDu = getSubscriptionPrice() + totalCreations - totalPaiements
+
+  if (loading) return <div className="p-8 text-center text-green-800 font-bold">Chargement...</div>
+
+    // Si non connecté ou pas admin -> On affiche le formulaire de connexion Admin
+    if (!isAdmin) {
+      return (
+        <div className="min-h-screen bg-green-50 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white p-8 rounded-2xl shadow-lg border-t-4 border-yellow-400">
+        <div className="flex justify-center mb-6">
+        <Image src="/logo.png" alt="Logo" width={80} height={80} className="rounded-full" />
+        </div>
+        <h1 className="text-2xl font-bold text-green-800 mb-6 text-center">Espace Administrateur</h1>
+        <form onSubmit={handleLogin} className="space-y-4">
+        <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Email Admin</label>
+        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full p-3 border border-gray-300 rounded-lg bg-white text-gray-900" required />
+        </div>
+        <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Mot de passe</label>
+        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full p-3 border border-gray-300 rounded-lg bg-white text-gray-900" required />
+        </div>
+        {errorLogin && <p className="text-red-500 text-sm bg-red-50 p-2 rounded">{errorLogin}</p>}
+        <button type="submit" className="w-full bg-green-700 text-white py-3 px-4 rounded-lg hover:bg-green-800 transition font-bold text-lg">Se connecter</button>
+        </form>
+        </div>
+        </div>
+      )
+    }
+
+    return (
+      <div className="min-h-screen bg-green-50 flex flex-col md:flex-row">
+
+      {/* --- COLONNE GAUCHE : LISTE ÉLÈVES --- */}
+      <div className="w-full md:w-1/3 bg-green-900 p-4 border-r overflow-y-auto h-screen text-white shadow-xl">
+      <div className="flex justify-between items-center mb-6">
+      <div className="flex items-center gap-3">
+      <Image src="/logo.png" alt="Logo" width={40} height={40} className="rounded-full" />
+      <h1 className="text-xl font-bold text-yellow-300">Rêve de Porcelaine</h1>
+      </div>
+      <button onClick={handleLogout} className="text-xs bg-red-500 text-white px-2 py-1 rounded hover:bg-red-600">Déconnexion</button>
+      </div>
+
+      <div className="mb-4">
+      <label className="text-xs text-green-300 block mb-1">Mes élèves ({profiles.length})</label>
+      {/* BARRE DE RECHERCHE */}
+      <input
+      type="text"
+      placeholder="Rechercher un élève..."
+      value={searchTerm}
+      onChange={(e) => setSearchTerm(e.target.value)}
+      className="w-full p-2 border border-green-700 rounded bg-green-800 text-white placeholder-green-400 text-sm"
+      />
+      </div>
+
+      <div className="space-y-2">
+      {profiles.map(student => (
+        <button
+        key={student.id}
+        onClick={() => selectStudent(student)}
+        className={`w-full text-left p-3 rounded-lg transition ${selectedStudent?.id === student.id ? 'bg-yellow-400 text-green-900 font-bold shadow-md' : 'bg-green-800 hover:bg-green-700 text-white border border-green-700'}`}
+        >
+        <div className="font-semibold">{student.last_name} {student.first_name}</div>
+        <div className="text-xs flex justify-between mt-1 opacity-80">
+        <span>{student.subscription_type.replace('_', ' ')} {student.subscription_type === 'annuel' ? getCreneauName(student.creneau_id) : ''}</span>
+        <span>{student.subscription_type !== 'annuel' ? `${student.sessions_left} rest.` : 'Annuel'}</span>
+        </div>
+        </button>
+      ))}
+      </div>
+      </div>
+
+      {/* --- COLONNE DROITE : FICHE ÉLÈVE --- */}
+      <div className="w-full md:w-2/3 p-8 overflow-y-auto h-screen bg-white">
+
+      {/* SYSTEME D'ONGLETS */}
+      <div className="flex space-x-4 mb-8 border-b border-gray-200">
+      <button
+      onClick={() => setActiveTab('eleves')}
+      className={`py-3 px-6 font-semibold transition-colors ${activeTab === 'eleves' ? 'border-b-4 border-yellow-400 text-green-800' : 'text-gray-400 hover:text-green-600'}`}
+      >
+      👥 Gestion Élèves
+      </button>
+      <button
+      onClick={() => setActiveTab('planning')}
+      className={`py-3 px-6 font-semibold transition-colors ${activeTab === 'planning' ? 'border-b-4 border-yellow-400 text-green-800' : 'text-gray-400 hover:text-green-600'}`}
+      >
+      📅 Planning Séances
+      </button>
+      </div>
+
+      {/* CONTENU ONGLET ELEVES (L'ANCIEN CODE) */}
+      {activeTab === 'eleves' && (
+        <>
+        {!selectedStudent ? (
+          <div className="flex items-center justify-center h-3/4 text-green-300 text-lg">← Choisissez un élève dans la liste</div>
+        ) : (
+          <div className="max-w-3xl mx-auto space-y-6">
+          {/* Toute la fiche élève existante va ici */}
+          <h2 className="text-3xl font-bold text-green-800 border-b-4 border-yellow-400 pb-2 inline-block">
+          {selectedStudent.last_name} {selectedStudent.first_name}
+          </h2>
+          <p className="text-md text-gray-600 mt-1 font-medium">
+          Forfait : <span className="text-green-700 capitalize">{selectedStudent.subscription_type.replace('_', ' ')}</span> {selectedStudent.subscription_type === 'annuel' && <span className="text-yellow-600">{getCreneauName(selectedStudent.creneau_id)}</span>}
+          </p>
+          {/* BOUTON RESET MDP */}
+          <button
+                    onClick={() => handleResetPassword(selectedStudent.email || '')}
+          className="text-xs text-gray-400 hover:text-blue-500 mt-2 block"
+          >
+          🔑 Réinitialiser le mot de passe
+          </button>
+
+          {/* CARDE SOLDE */}
+          <div className={`p-5 rounded-xl shadow-md border-l-8 ${soldeDu > 0 ? 'bg-orange-50 border-orange-500' : 'bg-green-50 border-green-500'}`}>
+          <h3 className="font-bold text-lg text-gray-800 mb-3">Situation Financière</h3>
+          <div className="mt-3 grid grid-cols-3 gap-4 text-sm">
+          <div className="bg-white p-2 rounded shadow-sm text-center"><div className="text-gray-500">Forfait</div><div className="font-bold text-green-800">{getSubscriptionPrice().toFixed(2)}€</div></div>
+          <div className="bg-white p-2 rounded shadow-sm text-center"><div className="text-gray-500">Cuissons</div><div className="font-bold text-green-800">{totalCreations.toFixed(2)}€</div></div>
+          <div className="bg-white p-2 rounded shadow-sm text-center"><div className="text-gray-500">Payé</div><div className="font-bold text-green-800">{totalPaiements.toFixed(2)}€</div></div>
+          </div>
+          <div className="mt-4 text-right text-2xl font-bold">Reste à payer : <span className={soldeDu > 0 ? 'text-red-600' : 'text-green-600'}>{soldeDu > 0 ? `${soldeDu.toFixed(2)}€` : 'Soldé ✅'}</span></div>
+          </div>
+
+          {/* GESTION FORFAIT */}
+          <div className="bg-green-50 p-4 rounded-xl shadow-sm border border-green-200">
+          <h3 className="font-bold mb-3 text-green-900">⚙️ Gérer le forfait & Séances</h3>
+
+          {/* Sur mobile (flex-col), le select prend toute la largeur. Sur ordi (sm:flex-row), tout sur une ligne */}
+          <div className="flex flex-col sm:flex-row gap-3">
+          <div className="flex-1">
+          <label className="text-xs text-gray-600">Type de forfait</label>
+          <select value={editSubscription} onChange={e => setEditSubscription(e.target.value)} className="w-full mt-1 p-2 border border-green-300 rounded bg-white text-gray-900 focus:ring-yellow-400 focus:border-yellow-400">
+          <option value="aucun">Aucun</option>
+          <option value="annuel">Annuel</option>
+          <option value="3_seances">3 séances</option>
+          <option value="5_seances">5 séances</option>
+          <option value="10_seances">10 séances</option>
+          </select>
+          </div>
+
+          {/* Sur mobile, le compteur et le bouton sont côte à côte en dessous */}
+          <div className="flex gap-2 items-end">
+          <div className="w-20"> {/* Réduit de w-28 à w-20 */}
+          <label className="text-xs text-gray-600 block">Séances</label>
+          <input
+          type="number"
+          min="0"
+          value={editSessionsLeft}
+          onChange={e => setEditSessionsLeft(parseInt(e.target.value) || 0)}
+          className="w-full mt-1 p-2 border border-green-300 rounded bg-white text-gray-900 text-center"
+          />
+          </div>
+          <button
+          onClick={handleUpdateSubscription}
+          disabled={saving}
+          className="bg-green-700 text-white px-4 py-2 rounded font-semibold hover:bg-green-800 disabled:bg-gray-400 transition shadow-sm whitespace-nowrap"
+          >
+          Mettre à jour
+          </button>
+          </div>
+          </div>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-6">
+          {/* SECTION CUISSONS */}
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+          <h3 className="font-bold mb-3 text-gray-800">🎨 Créations ({totalCreations.toFixed(2)}€)</h3>
+          <form onSubmit={handleAddCreation} className="space-y-2 mb-4 bg-green-50 p-3 rounded-lg border border-green-100">
+          <input type="text" placeholder="Nom pièce" value={newCreation.piece_name} onChange={e => setNewCreation({...newCreation, piece_name: e.target.value})} className="w-full p-2 border rounded text-sm bg-white text-gray-900" />
+          <div className="flex gap-2">
+          <input type="number" step="0.01" placeholder="Poids kg" value={newCreation.weight_kg} onChange={e => setNewCreation({...newCreation, weight_kg: e.target.value})} required className="w-1/2 p-2 border rounded text-sm bg-white text-gray-900" />
+          <select value={newCreation.firing_passes} onChange={e => setNewCreation({...newCreation, firing_passes: parseInt(e.target.value)})} className="w-1/2 p-2 border rounded text-sm bg-white text-gray-900">
+          <option value={1}>1 passage</option><option value={2}>2 passages</option>
+          </select>
+          </div>
+          <button type="submit" disabled={saving} className="w-full bg-green-600 text-white py-1.5 rounded text-sm hover:bg-green-700 transition font-semibold">+ Ajouter cuisson</button>
+          </form>
+          <div className="max-h-48 overflow-y-auto space-y-2 text-sm">
+          {creations.map(c => (<div key={c.id} className="flex justify-between bg-gray-50 p-2 rounded border"><span className="text-gray-700">{c.piece_name || 'Pièce'} <span className="text-xs text-gray-400">({c.weight_kg}kg x{c.firing_passes}P)</span></span><span className="font-semibold text-green-700">{c.cost.toFixed(2)}€</span></div>))}
+          </div>
+          </div>
+
+          {/* SECTION PAIEMENTS */}
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+          <h3 className="font-bold mb-3 text-gray-800">💰 Paiements ({totalPaiements.toFixed(2)}€)</h3>
+          <form onSubmit={handleAddPaiement} className="space-y-2 mb-4 bg-yellow-50 p-3 rounded-lg border border-yellow-100">
+          <div className="flex gap-2">
+          <input type="number" step="0.01" placeholder="Montant €" value={newPaiement.montant} onChange={e => setNewPaiement({...newPaiement, montant: e.target.value})} required className="w-1/2 p-2 border rounded text-sm bg-white text-gray-900" />
+          <select value={newPaiement.mode} onChange={e => setNewPaiement({...newPaiement, mode: e.target.value})} className="w-1/2 p-2 border rounded text-sm bg-white text-gray-900">
+          <option value="especes">Espèces</option><option value="cheque">Chèque</option><option value="wero">Wero</option>
+          </select>
+          </div>
+          <input type="date" value={newPaiement.date_paiement} onChange={e => setNewPaiement({...newPaiement, date_paiement: e.target.value})} className="w-full p-2 border rounded text-sm bg-white text-gray-900" />
+          <button type="submit" disabled={saving} className="w-full bg-yellow-500 text-green-900 font-bold py-1.5 rounded text-sm hover:bg-yellow-400 shadow-sm transition">+ Encaisser</button>
+          </form>
+          <div className="max-h-48 overflow-y-auto space-y-2 text-sm">
+          {paiements.map(p => (<div key={p.id} className="flex justify-between bg-gray-50 p-2 rounded border"><span className="text-gray-700">{new Date(p.date_paiement).toLocaleDateString('fr-FR')} <span className="text-xs text-gray-400">({p.mode})</span></span><span className="font-semibold text-green-700">+{p.montant.toFixed(2)}€</span></div>))}
+          </div>
+          </div>
+          </div>
+          </div>
+        )}
+        </>
+      )}
+
+      {/* CONTENU ONGLET PLANNING (NOUVEAU) */}
+      {activeTab === 'planning' && (
+        <div className="max-w-3xl mx-auto space-y-4">
+
+        <div className="flex flex-col sm:flex-row justify-between items-center mb-4 gap-4">
+        <h2 className="text-2xl font-bold text-green-800">Prochaines séances</h2>
+
+        {/* LE BOUTON MAGIQUE */}
+        <button
+        onClick={handleGenerateYear}
+        disabled={generating}
+        className="bg-yellow-500 text-green-900 font-bold py-3 px-6 rounded-lg hover:bg-yellow-400 transition shadow-md disabled:bg-gray-300 whitespace-nowrap"
+        >
+        {generating ? '⏳ Génération en cours...' : "🗓️ Générer l'année scolaire"}
+        </button>
+        </div>
+
+        {planningSessions.length === 0 && <p className="text-gray-400 text-center py-8">Aucune séance à venir.</p>}
+
+        {planningSessions.map(session => {
+          const dateObj = new Date(session.session_date + 'T00:00:00')
+          const dateStr = dateObj.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
+          const maxCap = session.creneaux.capacite_max || 8
+
+          const bookedCards = session.bookings?.filter((b: any) => b.status === 'booked_card') || []
+          const absentAnnuels = session.bookings?.filter((b: any) => b.status === 'absent_annuel') || []
+          const annuelsForThisCreneau = profiles.filter(p => p.creneau_id === session.creneau_id && p.subscription_type === 'annuel')
+
+          const presentAnnuels = annuelsForThisCreneau.filter(a => !absentAnnuels.some((abs: any) => abs.profile_id === a.id))
+          const totalPresent = presentAnnuels.length + bookedCards.length
+          const isFull = totalPresent >= maxCap
+
+          return (
+            <div key={session.id} className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
+            <div className="flex justify-between items-center mb-3">
+            <div>
+            <h3 className="font-bold text-lg text-green-800 capitalize">{dateStr}</h3>
+            <p className="text-sm text-gray-500">
+            {session.creneaux.jour} de {session.creneaux.heure_debut.substring(0,5)} à {session.creneaux.heure_fin.substring(0,5)} ({session.creneaux.public_cible.replace('_', ' ')})
+            </p>
+            </div>
+            <div className="text-right">
+            <div className={`text-2xl font-bold ${isFull ? 'text-red-600' : 'text-green-700'}`}>
+            {totalPresent}/{maxCap}
+            </div>
+            <p className="text-xs text-gray-500">{isFull ? 'Complet' : 'Disponible'}</p>
+            </div>
+            </div>
+
+            <div className="w-full bg-gray-200 rounded-full h-2.5 mb-4">
+            <div className={`${isFull ? 'bg-red-500' : 'bg-green-500'} h-2.5 rounded-full transition-all`} style={{ width: `${(totalPresent / maxCap) * 100}%` }}></div>
+            </div>
+
+            <div className="space-y-1 text-sm">
+            {annuelsForThisCreneau.map(annuel => {
+              const isAbsent = absentAnnuels.some((b: any) => b.profile_id === annuel.id)
+              return (
+                <div key={annuel.id} className={`flex items-center gap-2 ${isAbsent ? 'line-through text-gray-400' : 'text-gray-700'}`}>
+                <span>👤 {annuel.first_name} {annuel.last_name}</span>
+                <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700">Annuel</span>
+                {isAbsent && <span className="text-xs text-orange-500 font-semibold ml-auto">Absent</span>}
+                </div>
+              )
+            })}
+            {bookedCards.map((b: any) => (
+              <div key={b.profile_id} className="flex items-center gap-2 text-gray-700">
+              <span>👤 {b.profiles.first_name} {b.profiles.last_name}</span>
+              <span className="text-xs px-2 py-0.5 rounded bg-yellow-100 text-yellow-800">Carte</span>
+              </div>
+            ))}
+            </div>
+            </div>
+          )
+        })}
+        </div>
+      )}
+
+      </div>
+      </div>
+    )
+}
