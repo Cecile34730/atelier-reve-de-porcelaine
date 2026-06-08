@@ -85,6 +85,7 @@ export default function DashboardPage() {
   const [creneaux, setCreneaux] = useState<Creneau[]>([])
   const [newPassword, setNewPassword] = useState('')
   const [showPasswordForm, setShowPasswordForm] = useState(false)
+  const [bookingSessionId, setBookingSessionId] = useState<string | null>(null)
 
   // Auth & Formulaires
   const [email, setEmail] = useState('')
@@ -271,8 +272,14 @@ export default function DashboardPage() {
   }
 
   const handleBookSession = async (sessionId: string) => {
+    setBookingSessionId(sessionId) // Verrouille le bouton
     const { error } = await supabase.rpc('book_card_session', { p_session_id: sessionId })
-    if (error) { alert(error.message) } else { if (profile) await fetchUserData(profile.id) }
+    if (error) {
+      alert(error.message)
+    } else {
+      if (profile) await fetchUserData(profile.id)
+    }
+    setBookingSessionId(null) // Déverrouille le bouton
   }
 
   const handleDeclareAbsence = async (sessionId: string) => {
@@ -750,8 +757,12 @@ export default function DashboardPage() {
               booking?.status === 'booked_card' ? (
                 <span className="text-xs bg-green-100 text-green-700 px-3 py-1 rounded font-bold">Inscrit ✅</span>
               ) : (
-                <button onClick={() => handleBookSession(session.id)} className="bg-green-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-green-700 transition">
-                Réserver
+                <button
+                onClick={() => handleBookSession(session.id)}
+                disabled={bookingSessionId === session.id} // Désactive si en cours de réservation
+                className="bg-green-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                {bookingSessionId === session.id ? 'Réservation...' : 'Réserver'}
                 </button>
               )
             ) : null}
