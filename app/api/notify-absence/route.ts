@@ -63,7 +63,9 @@ export async function POST(request: Request) {
     if (!brevoResponse.ok) {
       const errData = await brevoResponse.json()
       console.error("Erreur Brevo:", errData)
-      return NextResponse.json({ error: 'Erreur lors de l\'envoi de l\'email' }, { status: 500 })
+      // On renvoie le vrai message de Brevo pour comprendre l'erreur
+      const errorMessage = errData.message || JSON.stringify(errData);
+      return NextResponse.json({ error: `Erreur Brevo: ${errorMessage}` }, { status: 500 })
     }
 
     return NextResponse.json({ success: true, message: `Email envoyé à ${students.length} élève(s).` })
