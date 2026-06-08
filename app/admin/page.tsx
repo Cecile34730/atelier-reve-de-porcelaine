@@ -28,6 +28,11 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true)
   const [isAdmin, setIsAdmin] = useState(false)
 
+  const [editingCreationId, setEditingCreationId] = useState<string | null>(null)
+  const [editCreationName, setEditCreationName] = useState('')
+  const [editCreationWeight, setEditCreationWeight] = useState('')
+  const [editCreationPasses, setEditCreationPasses] = useState<number>(1)
+
   const [selectedStudent, setSelectedStudent] = useState<Profile | null>(null)
   const [creations, setCreations] = useState<Creation[]>([])
   const [paiements, setPaiements] = useState<Paiement[]>([])
@@ -112,6 +117,39 @@ export default function AdminPage() {
     const { data, error } = await supabase.from('creations').insert({ profile_id: selectedStudent.id, piece_name: newCreation.piece_name || null, weight_kg: parseFloat(newCreation.weight_kg), firing_passes: newCreation.firing_passes }).select().single()
     if (!error && data) { setCreations([data, ...creations]); setNewCreation({ piece_name: '', weight_kg: '', firing_passes: 1 }) } else { alert('Erreur: ' + error?.message) }
     setSaving(false)
+  }
+
+  const startEditingCreation = (c: Creation) => {
+    setEditingCreationId(c.id)
+    setEditCreationName(c.piece_name || '')
+    setEditCreationWeight(c.weight_kg.toString())
+    setEditCreationPasses(c.firing_passes)
+  }
+
+  const handleUpdateCreation = async (creationId: string) => {
+    if (!selectedStudent) return
+      setSaving(true)
+
+      const { error } = await supabase
+      .from('creations')
+      .update({
+        piece_name: editCreationName || null,
+        weight_kg: parseFloat(editCreationWeight),
+              firing_passes: editCreationPasses
+      })
+      .eq('id', creationId)
+
+      if (!error) {
+        // On rafraîchit les données de l'élève pour voir le nouveau coût calculé par Supabase
+        const { data: freshProfile } = await supabase.from('profiles').select('*').eq('id', selectedStudent.id).single()
+        if (freshProfile) setSelectedStudent(freshProfile as Profile)
+
+          await selectStudent(selectedStudent) // Recharge les créations
+          setEditingCreationId(null) // Sort du mode édition
+      } else {
+        alert('Erreur: ' + error.message)
+      }
+      setSaving(false)
   }
 
   const handleAddPaiement = async (e: React.FormEvent) => {
@@ -264,17 +302,50 @@ export default function AdminPage() {
                       <input type="text" placeholder="Nom de la pièce (opt.)" value={newCreation.piece_name} onChange={(e) => setNewCreation({...newCreation, piece_name: e.target.value})} className="w-full p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm" />
                       <div className="flex space-x-2">
                         <input type="number" step="0.1" placeholder="Poids (kg)" value={newCreation.weight_kg} onChange={(e) => setNewCreation({...newCreation, weight_kg: e.target.value})} className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm" required />
-                        <input type="number" placeholder="Cuissons" value={newCreation.firing_passes} onChange={(e) => setNewCreation({...newCreation, firing_passes: parseInt(e.target.value) || 1})} className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm" min="1" />
+                        <select value={newCreation.firing_passes} onChange={(e) => setNewCreation({...newCreation, firing_passes: parseInt(e.target.value)})} className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm">
+                        <option value={1}>1 cuisson</option>
+                        <option value={2}>2 cuissons</option>
+                        </select>
                       </div>
                       <button type="submit" disabled={saving} className="w-full bg-green-600 text-white p-2 rounded hover:bg-green-700 text-sm font-bold disabled:opacity-50">Ajouter</button>
                     </form>
                     <div className="space-y-2 max-h-60 overflow-y-auto">
-                      {creations.map(c => (
-                        <div key={c.id} className="flex justify-between items-center text-sm p-2 bg-gray-50 rounded border">
-                          <span className="text-gray-800 font-medium">{c.piece_name || 'Sans nom'} <span className="text-gray-500 font-normal">({c.weight_kg}kg, {c.firing_passes} cuis.)</span></span>
-                          <span className="font-bold text-green-700">{c.cost.toFixed(2)}€</span>
+                    {creations.map(c => (
+                      <div key={c.id} className="text-sm p-2 bg-gray-50 rounded border">
+                      {editingCreationId === c.id ? (
+                        // --- MODE ÉDITION ---
+                        <div className="space-y-2">
+                        <input type="text" value={editCreationName} onChange={(e) => setEditCreationName(e.target.value)} className="w-full p-1 border border-gray-300 rounded bg-white text-gray-900" placeholder="Nom de la pièce" />
+                        <div className="flex gap-2">
+                        <input type="number" step="0.1" value={editCreationWeight} onChange={(e) => setEditCreationWeight(e.target.value)} className="w-1/2 p-1 border border-gray-300 rounded bg-white text-gray-900" />
+                        <select value={editCreationPasses} onChange={(e) => setEditCreationPasses(parseInt(e.target.value))} className="w-1/2 p-1 border border-gray-300 rounded bg-white text-gray-900">
+                        <option value={1}>1 cuisson</option>
+                        <option value={2}>2 cuissons</option>
+                        </select>
                         </div>
-                      ))}
+                        <div className="flex gap-2">
+                        <button onClick={() => handleUpdateCreation(c.id)} disabled={saving} className="w-full bg-green-600 text-white p-1 rounded text-xs font-bold hover:bg-green-700 disabled:opacity-50">
+                        {saving ? 'Sauvegarde...' : 'Valider'}
+                        </button>
+                        <button onClick={() => setEditingCreationId(null)} className="w-full bg-gray-300 text-gray-800 p-1 rounded text-xs font-bold hover:bg-gray-400">
+                        Annuler
+                        </button>
+                        </div>
+                        </div>
+                      ) : (
+                        // --- MODE AFFICHAGE NORMAL ---
+                        <div className="flex justify-between items-center">
+                        <span className="text-gray-800 font-medium">
+                        {c.piece_name || 'Sans nom'} <span className="text-gray-500 font-normal">({c.weight_kg}kg, {c.firing_passes} cuis.)</span>
+                        </span>
+                        <div className="flex items-center gap-2">
+                        <span className="font-bold text-green-700">{c.cost.toFixed(2)}€</span>
+                        <button onClick={() => startEditingCreation(c)} className="text-blue-500 hover:text-blue-700 text-base" title="Modifier">✏️</button>
+                        </div>
+                        </div>
+                      )}
+                      </div>
+                    ))}
                       {creations.length === 0 && <p className="text-sm text-gray-400 text-center py-2">Aucune création</p>}
                     </div>
                   </div>
@@ -289,7 +360,7 @@ export default function AdminPage() {
                           <option value="especes">Espèces</option>
                           <option value="cb">CB</option>
                           <option value="cheque">Chèque</option>
-                          <option value="virement">Virement</option>
+                          <option value="wero">Wero</option>
                         </select>
                       </div>
                       <div className="flex space-x-2">
