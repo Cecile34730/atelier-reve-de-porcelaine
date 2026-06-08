@@ -376,7 +376,7 @@ export default function AdminPage() {
                 <div className="text-sm text-gray-600">
                 <p className="font-medium mb-1">Inscrits ({session.bookings.length}/{session.creneaux.capacite_max}) :</p>
                 <div className="flex flex-wrap gap-2">
-                {session.bookings.map(b => (
+                {session.bookings.map((b: any) => (
                   <span key={b.profile_id} className="bg-white px-2 py-1 rounded border shadow-sm text-xs">
                   {b.profiles.first_name} {b.profiles.last_name}
                   </span>

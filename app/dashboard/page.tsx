@@ -134,9 +134,9 @@ export default function DashboardPage() {
               if (sessionsData && profileData) {
                 let filteredSessions = sessionsData;
                 if (profileData.is_minor) {
-                  filteredSessions = sessionsData.filter(s => s.creneaux.public_cible.startsWith('enfants'));
+                  filteredSessions = sessionsData.filter(s => (s.creneaux as any).public_cible?.startsWith('enfants'));
                 } else {
-                  filteredSessions = sessionsData.filter(s => s.creneaux.public_cible === 'adultes');
+                  filteredSessions = sessionsData.filter(s => (s.creneaux as any).public_cible === 'adultes');
                 }
                 setSessions(filteredSessions as any)
               }
@@ -727,8 +727,8 @@ export default function DashboardPage() {
           const booking = myBookings.find(b => b.session_id === session.id)
           const dateObj = new Date(session.session_date + 'T00:00:00')
           const dateStr = dateObj.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
-          const heureDebut = session.creneaux.heure_debut.substring(0, 5)
-          const heureFin = session.creneaux.heure_fin.substring(0, 5)
+          const heureDebut = (session.creneaux as any).heure_debut?.substring(0, 5) || ''
+          const heureFin = (session.creneaux as any).heure_fin?.substring(0, 5) || ''
 
           return (
             <div key={session.id} className="flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-100">

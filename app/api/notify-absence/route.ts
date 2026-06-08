@@ -9,7 +9,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Session ID manquant' }, { status: 400 })
     }
 
-    const supabase = createClient()
+    const supabase = await createClient()
 
     // 1. Récupérer les infos de la session et les élèves inscrits
     const { data: sessionData, error: sessionError } = await supabase
@@ -22,7 +22,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Session non trouvée' }, { status: 404 })
     }
 
-    const students = sessionData.bookings.map((b: any) => b.profiles).filter((p: any) => p.email)
+    const students = sessionData.bookings.map((b: any) => {
+      const profile = Array.isArray(b.profiles) ? b.profiles[0] : b.profiles;
+      return profile;
+    }).filter((p: any) => p && p.email)
 
     if (students.length === 0) {
       return NextResponse.json({ message: 'Aucun élève inscrit à cette séance.' })
@@ -30,7 +33,7 @@ export async function POST(request: Request) {
 
     // 2. Préparer l'email
     const dateStr = new Date(sessionData.session_date + 'T00:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
-    const heureStr = sessionData.creneaux.heure_debut.substring(0, 5)
+    const heureStr = (sessionData.creneaux as any).heure_debut.substring(0, 5)
 
     const subject = `⚠️ Atelier Rêve de Porcelaine : Annulation du cours du ${dateStr}`
     const htmlContent = `
