@@ -133,7 +133,7 @@ export default function AdminPage() {
 
   const handleAddCreation = async (e: React.FormEvent) => {
     e.preventDefault(); if (!selectedStudent || !newCreation.weight_kg) return; setSaving(true)
-    const { data, error } = await supabase.from('creations').insert({ profile_id: selectedStudent.id, piece_name: newCreation.piece_name || null, weight_kg: parseFloat(newCreation.weight_kg), firing_passes: newCreation.firing_passes }).select().single()
+    const { data, error } = await supabase.from('creations').insert({ profile_id: selectedStudent.id, piece_name: newCreation.piece_name || null, weight_kg: parseFloat(newCreation.weight_kg) / 1000, firing_passes: newCreation.firing_passes }).select().single()
     if (!error && data) { setCreations([data, ...creations]); setNewCreation({ piece_name: '', weight_kg: '', firing_passes: 1 }) } else { alert('Erreur: ' + error?.message) }
     setSaving(false)
   }
@@ -363,7 +363,7 @@ export default function AdminPage() {
                     <form onSubmit={handleAddCreation} className="space-y-2 mb-4 bg-gray-50 p-3 rounded-lg">
                       <input type="text" placeholder="Nom de la pièce (opt.)" value={newCreation.piece_name} onChange={(e) => setNewCreation({...newCreation, piece_name: e.target.value})} className="w-full p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm" />
                       <div className="flex space-x-2">
-                        <input type="number" step="0.1" placeholder="Poids (g)" value={newCreation.weight_kg} onChange={(e) => setNewCreation({...newCreation, weight_kg: e.target.value})} className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm" required />
+                        <input type="number" step="1" placeholder="Poids (g)" value={newCreation.weight_kg} onChange={(e) => setNewCreation({...newCreation, weight_kg: e.target.value})} className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm" required />
                         <select value={newCreation.firing_passes} onChange={(e) => setNewCreation({...newCreation, firing_passes: parseInt(e.target.value)})} className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm">
                         <option value={1}>1 cuisson</option>
                         <option value={2}>2 cuissons</option>

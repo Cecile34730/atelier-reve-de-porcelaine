@@ -690,7 +690,7 @@ export default function DashboardPage() {
         <div className="max-h-48 overflow-y-auto space-y-2 text-sm">
         {creations.map(c => (
           <div key={c.id} className="flex justify-between bg-gray-50 p-2 rounded border">
-          <span className="text-gray-700">{c.piece_name || 'Pièce'} <span className="text-xs text-gray-400">({c.weight_kg}kg)</span></span>
+          <span className="text-gray-700">{c.piece_name || 'Pièce'} <span className="text-xs text-gray-400">({Math.round(c.weight_kg * 1000)}g)</span></span>
           <span className="font-semibold text-green-700">{c.cost.toFixed(2)}€</span>
           </div>
         ))}
