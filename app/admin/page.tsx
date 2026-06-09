@@ -47,11 +47,13 @@ export default function AdminPage() {
   const [password, setPassword] = useState('')
   const [errorLogin, setErrorLogin] = useState('')
 
-  const [activeTab, setActiveTab] = useState<'eleves' | 'planning'>('eleves')
+  const [activeTab, setActiveTab] = useState<'eleves' | 'planning' | 'bilan'>('eleves')
   const [planningSessions, setPlanningSessions] = useState<any[]>([])
   const [creneauxList, setCreneauxList] = useState<any[]>([])
   const [generating, setGenerating] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
+  const [yearCreations, setYearCreations] = useState<any[]>([])
+  const [yearPaiements, setYearPaiement] = useState<any[]>([])
 
   const fetchStudents = useCallback(async () => {
     const { data } = await supabase.from('profiles').select('*').eq('role', 'eleve').order('last_name')
@@ -71,8 +73,16 @@ export default function AdminPage() {
 
   useEffect(() => {
     const init = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
+      try {
+        const { data: { user }, error } = await supabase.auth.getUser()
+
+        if (error || !user) {
+          // Si le jeton est invalide (Invalid Refresh Token), on nettoie tout
+          await supabase.auth.signOut()
+          window.location.href = '/dashboard';
+  return
+        }
+
         const { data } = await supabase.from('profiles').select('role').eq('id', user.id).single()
         if (data?.role === 'admin') {
           setIsAdmin(true)
@@ -80,10 +90,19 @@ export default function AdminPage() {
           await fetchPrices()
           const { data: creneauxData } = await supabase.from('creneaux').select('*')
           if (creneauxData) setCreneauxList(creneauxData)
-          await fetchPlanning()
-        } else { await supabase.auth.signOut(); window.location.href = '/dashboard'; return }
-      } else { window.location.href = '/dashboard'; return }
-      setLoading(false)
+            await fetchPlanning()
+        } else {
+          await supabase.auth.signOut();
+          window.location.href = '/dashboard';
+  return
+        }
+      } catch (err) {
+        // En cas d'erreur critique, on déconnecte aussi
+        await supabase.auth.signOut()
+        window.location.href = '/dashboard';
+      } finally {
+        setLoading(false)
+      }
     }
     init()
   }, [fetchStudents, fetchPrices])
@@ -173,6 +192,43 @@ export default function AdminPage() {
     if (!error) alert('Email envoyé !'); else alert('Erreur: ' + error.message)
   }
 
+  const getSchoolYearDates = () => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth(); // 0 = Jan, 8 = Sept
+
+    let startYear = currentYear;
+    // Si on est entre Janvier et Août, l'année scolaire a commencé l'année précédente
+    if (currentMonth < 8) {
+      startYear = currentYear - 1;
+    }
+
+    return {
+      start: `${startYear}-09-01`, // 1er Septembre
+      end: `${startYear + 1}-06-30`  // 30 Juin
+    };
+  }
+
+  const fetchYearSummary = async () => {
+    const { start, end } = getSchoolYearDates();
+
+    // Récupérer les créations de l'année
+    const { data: cData } = await supabase
+    .from('creations')
+    .select('*, profiles ( first_name, last_name )')
+    .gte('created_at', start)
+    .lte('created_at', end + 'T23:59:59');
+    if (cData) setYearCreations(cData);
+
+    // Récupérer les paiements de l'année
+    const { data: pData } = await supabase
+    .from('paiements')
+    .select('*')
+    .gte('date_paiement', start)
+    .lte('date_paiement', end);
+    if (pData) setYearPaiement(pData);
+  }
+
   const getCreneauName = (creneauId: string | null | undefined) => { if (!creneauId) return ''; const creneau = creneauxList.find(c => c.id === creneauId); return creneau ? `(${creneau.jour} ${creneau.heure_debut.substring(0,5)})` : '' }
 
   const totalCreations = creations.reduce((sum, c) => sum + c.cost, 0)
@@ -233,9 +289,15 @@ export default function AdminPage() {
             onClick={() => setActiveTab('planning')}
             className={`px-4 py-2 font-bold rounded-t-lg transition ${activeTab === 'planning' ? 'bg-white text-green-800 border border-b-white -mb-[1px]' : 'text-green-600 hover:text-green-800'}`}
           >
-            Planning & Sessions
+          Planning & Sessions
           </button>
-        </div>
+          <button
+          onClick={() => { setActiveTab('bilan'); fetchYearSummary(); }}
+          className={`px-4 py-2 font-bold rounded-t-lg transition ${activeTab === 'bilan' ? 'bg-white text-green-800 border border-b-white -mb-[1px]' : 'text-green-600 hover:text-green-800'}`}
+          >
+          📊 Bilan Annuel
+          </button>
+          </div>
 
         {/* ONGLET GESTION ÉLÈVE */}
         {activeTab === 'eleves' && (
@@ -468,7 +530,36 @@ export default function AdminPage() {
           </div>
         )}
 
-      </div>
-    </div>
+        {/* ONGLET PLANNING & SESSIONS */}
+        {activeTab === 'planning' && (
+          <div className="space-y-6">
+          {/* ... tout le code du planning ... */}
+          </div>
+        )}
+
+        {/* ONGLET BILAN ANNUEL */}
+        {activeTab === 'bilan' && (
+          <div className="space-y-6">
+
+          {/* 1. TABLEAU DE BORD FINANCIER */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {/* ... le code du tableau de bord ... */}
+          </div>
+
+          {/* 2. LISTE DES ÉLÈVES ET SOLDES */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+          {/* ... le code du tableau des élèves ... */}
+          </div>
+
+          {/* 3. HISTORIQUE DES CRÉATIONS */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+          {/* ... le code de l'historique des créations ... */}
+          </div>
+
+          </div>
+        )}
+
+        </div>
+        </div>
   )
 }
