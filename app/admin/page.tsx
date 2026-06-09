@@ -18,7 +18,7 @@ type Profile = {
   creneau_id?: string | null
 }
 
-type Creation = { id: string; piece_name: string | null; weight_g: number; firing_passes: number; cost: number; created_at: string }
+type Creation = { id: string; piece_name: string | null; weight_kg: number; firing_passes: number; cost: number; created_at: string }
 type Paiement = { id: string; montant: number; date_paiement: string; mode: string; note: string | null }
 type Prices = { tarif_annuel_adulte: number; tarif_annuel_enfant: number; tarif_3_seances_adulte: number; tarif_3_seances_enfant: number; tarif_5_seances_adulte: number; tarif_5_seances_enfant: number; tarif_10_seances_adulte: number; tarif_10_seances_enfant: number }
 
@@ -37,7 +37,7 @@ export default function AdminPage() {
   const [creations, setCreations] = useState<Creation[]>([])
   const [paiements, setPaiements] = useState<Paiement[]>([])
 
-  const [newCreation, setNewCreation] = useState({ piece_name: '', weight_g: '', firing_passes: 1 })
+  const [newCreation, setNewCreation] = useState({ piece_name: '', weight_kg: '', firing_passes: 1 })
   const [newPaiement, setNewPaiement] = useState({ montant: '', date_paiement: new Date().toISOString().split('T')[0], mode: 'especes', note: '' })
   const [editSubscription, setEditSubscription] = useState<string>('')
   const [editSessionsLeft, setEditSessionsLeft] = useState<number>(0)
@@ -132,16 +132,16 @@ export default function AdminPage() {
   }
 
   const handleAddCreation = async (e: React.FormEvent) => {
-    e.preventDefault(); if (!selectedStudent || !newCreation.weight_g) return; setSaving(true)
-    const { data, error } = await supabase.from('creations').insert({ profile_id: selectedStudent.id, piece_name: newCreation.piece_name || null, weight_g: parseFloat(newCreation.weight_g), firing_passes: newCreation.firing_passes }).select().single()
-    if (!error && data) { setCreations([data, ...creations]); setNewCreation({ piece_name: '', weight_g: '', firing_passes: 1 }) } else { alert('Erreur: ' + error?.message) }
+    e.preventDefault(); if (!selectedStudent || !newCreation.weight_kg) return; setSaving(true)
+    const { data, error } = await supabase.from('creations').insert({ profile_id: selectedStudent.id, piece_name: newCreation.piece_name || null, weight_kg: parseFloat(newCreation.weight_kg), firing_passes: newCreation.firing_passes }).select().single()
+    if (!error && data) { setCreations([data, ...creations]); setNewCreation({ piece_name: '', weight_kg: '', firing_passes: 1 }) } else { alert('Erreur: ' + error?.message) }
     setSaving(false)
   }
 
   const startEditingCreation = (c: Creation) => {
     setEditingCreationId(c.id)
     setEditCreationName(c.piece_name || '')
-    setEditCreationWeight(c.weight_g.toString())
+    setEditCreationWeight((c.weight_kg * 1000).toString())
     setEditCreationPasses(c.firing_passes)
   }
 
@@ -153,7 +153,7 @@ export default function AdminPage() {
       .from('creations')
       .update({
         piece_name: editCreationName || null,
-        weight_g: parseFloat(editCreationWeight),
+        weight_kg: parseFloat(editCreationWeight) / 1000,
               firing_passes: editCreationPasses
       })
       .eq('id', creationId)
@@ -363,7 +363,7 @@ export default function AdminPage() {
                     <form onSubmit={handleAddCreation} className="space-y-2 mb-4 bg-gray-50 p-3 rounded-lg">
                       <input type="text" placeholder="Nom de la pièce (opt.)" value={newCreation.piece_name} onChange={(e) => setNewCreation({...newCreation, piece_name: e.target.value})} className="w-full p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm" />
                       <div className="flex space-x-2">
-                        <input type="number" step="0.1" placeholder="Poids (g)" value={newCreation.weight_g} onChange={(e) => setNewCreation({...newCreation, weight_g: e.target.value})} className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm" required />
+                        <input type="number" step="0.1" placeholder="Poids (g)" value={newCreation.weight_kg} onChange={(e) => setNewCreation({...newCreation, weight_kg: e.target.value})} className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm" required />
                         <select value={newCreation.firing_passes} onChange={(e) => setNewCreation({...newCreation, firing_passes: parseInt(e.target.value)})} className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm">
                         <option value={1}>1 cuisson</option>
                         <option value={2}>2 cuissons</option>
@@ -398,7 +398,7 @@ export default function AdminPage() {
                         // --- MODE AFFICHAGE NORMAL ---
                         <div className="flex justify-between items-center">
                         <span className="text-gray-800 font-medium">
-                        {c.piece_name || 'Sans nom'} <span className="text-gray-500 font-normal">({c.weight_g}g, {c.firing_passes} cuis.)</span>
+                        {c.piece_name || 'Sans nom'} <span className="text-gray-500 font-normal">({c.weight_kg * 1000}g, {c.firing_passes} cuis.)</span>
                         </span>
                         <div className="flex items-center gap-2">
                         <span className="font-bold text-green-700">{c.cost.toFixed(2)}€</span>
