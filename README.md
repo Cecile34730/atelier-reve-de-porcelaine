@@ -81,3 +81,5 @@ Où le trouver ? github.com (Dépôt : atelier-reve-de-porcelaine)
 
 "Rien ne marche, je suis perdue !"
 👉 Prenez une capture d'écran de ce qui bug et envoyez un message à Alain. Il pourra souvent régler le problème à distance en quelques minutes !
+
+Bon courage !
