@@ -15,6 +15,26 @@ C'est l'outil que vous utilisez tous les jours. Il y a deux types d'utilisateurs
      Onglet Élèves : Cliquez sur un élève pour voir sa fiche. Vous pouvez y ajouter des paiements, des créations (cuissons), modifier son forfait, ou lui envoyer un lien pour réinitialiser son mot de passe.
      Onglet Planning : Vous permet de générer toutes les séances de l'année (hors vacances). Si vous êtes absente, cliquez sur le bouton rouge "Prévenir d'absence" : un email sera envoyé automatiquement à tous les inscrits de cette séance.
      Onglet Bilan : Un résumé financier de l'année en cours (inscriptions, cuissons, argent encaissé, et ce qu'il vous est dû).
+     
+     🎒 Gestion des Forfaits & Demandes des Élèves
+
+Les élèves n'achètent plus de forfaits directement en ligne. Ils font une demande, et c'est vous qui validez et ajustez le montant dans votre espace Admin.
+
+Quand un élève vous fait une demande (bouton "Demander plus" sur son compte) :
+
+    Allez dans Supabase Dashboard > Table Editor > student_requests.
+    Vous verrez la demande de l'élève (séances supplémentaires, carte cadeau, etc.).
+    Connectez-vous sur votre Espace Admin (votresite.com/admin) et cliquez sur l'élève.
+    Modifiez les informations :
+         Séances restantes : Ajoutez le nombre de séances achetées au chiffre existant (ex: s'il en avait 2 et en prend 5, mettez 7).
+         Accès Cours d'Été autorisé : Cochez cette case s'il a payé pour l'été.
+         Prix personnalisé (Geste commercial) : C'est ici que vous tapez le montant total que l'élève vous doit.
+             Exemple 1 : Il vous devait 110€ et prend un forfait été à 150€. Tapez 260.
+             Exemple 2 : Il prend un forfait 10 séances (230€) mais vous voulez lui faire un geste commercial. Tapez 200.
+    Cliquez sur Mettre à jour forfait.
+    Retournez dans Supabase Dashboard > Table Editor > student_requests et supprimez la demande de l'éléve pour ne pas la traiter deux fois.
+
+Important : Le site calcule le "Solde dû" en se basant sur ce que vous inscrivez dans "Prix personnalisé". Vous avez le contrôle total sur les tarifs !
 
 🎨 Les Élèves - votresite.com/dashboard
 
