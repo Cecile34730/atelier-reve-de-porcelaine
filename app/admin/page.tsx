@@ -13,6 +13,7 @@ type Profile = {
   email: string | null
   subscription_type: string
   sessions_left: number
+  subscriptions?: any[]
   role: string
   is_minor: boolean
   creneau_id?: string | null
@@ -22,7 +23,7 @@ type Profile = {
 
 type Creation = { id: string; piece_name: string | null; weight_kg: number; firing_passes: number; cost: number; created_at: string }
 type Paiement = { id: string; montant: number; date_paiement: string; mode: string; note: string | null }
-type Prices = { tarif_annuelle_adulte: number; tarif_annuel_enfant: number; tarif_3_seances_adulte: number; tarif_3_seances_enfant: number; tarif_5_seances_adulte: number; tarif_5_seances_enfant: number; tarif_10_seances_adulte: number; tarif_10_seances_enfant: number; tarif_seance_unique_adulte: number; tarif_seance_unique_enfant: number; tarif_session_ete: number }
+type Prices = { tarif_annuel_adulte: number; tarif_annuel_enfant: number; tarif_3_seances_adulte: number; tarif_3_seances_enfant: number; tarif_5_seances_adulte: number; tarif_5_seances_enfant: number; tarif_10_seances_adulte: number; tarif_10_seances_enfant: number; tarif_seance_unique_adulte: number; tarif_seance_unique_enfant: number; tarif_session_ete: number }
 
 export default function AdminPage() {
   const [profiles, setProfiles] = useState<Profile[]>([])
@@ -59,7 +60,7 @@ export default function AdminPage() {
   const [yearPaiements, setYearPaiement] = useState<any[]>([])
 
   const fetchStudents = useCallback(async () => {
-    const { data } = await supabase.from('profiles').select('*').eq('role', 'eleve').order('first_name')
+    const { data } = await supabase.from('profiles').select('*, subscriptions(*)').eq('role', 'eleve').order('first_name')
     if (data) setProfiles(data)
   }, [])
 
@@ -104,27 +105,123 @@ export default function AdminPage() {
   }, [fetchStudents, fetchPrices])
 
   const selectStudent = async (student: Profile) => {
-    setSelectedStudent(student); setEditSubscription(student.subscription_type); setEditSessionsLeft(student.sessions_left); setEditCustomPrice(student.custom_subscription_price?.toString() || '')
-    const { data: cData } = await supabase.from('creations').select('*').eq('profile_id', student.id).order('created_at', { ascending: false }); if (cData) setCreations(cData)
-    const { data: pData } = await supabase.from('paiements').select('*').eq('profile_id', student.id).order('date_paiement', { ascending: false }); if (pData) setPaiements(pData)
-    const { data: freshProfile } = await supabase.from('profiles').select('*').eq('id', student.id).single()
-    if (freshProfile) { setSelectedStudent(freshProfile as Profile); setEditSubscription(freshProfile.subscription_type); setEditSessionsLeft(freshProfile.sessions_left); setEditCustomPrice(freshProfile.custom_subscription_price?.toString() || '') }
+    setSelectedStudent(student);
+    // On initialise par défaut
+    setEditSubscription('aucun');
+    setEditSessionsLeft(0);
+    setEditCustomPrice(student.custom_subscription_price?.toString() || '');
+
+    // Récupération des créations
+    const { data: cData } = await supabase.from('creations').select('*').eq('profile_id', student.id).order('created_at', { ascending: false });
+    if (cData) setCreations(cData);
+
+    // Récupération des paiements
+    const { data: pData } = await supabase.from('paiements').select('*').eq('profile_id', student.id).order('date_paiement', { ascending: false });
+    if (pData) setPaiements(pData);
+
+    // Récupération du profil frais (pour le prix custom et autres infos)
+    const { data: freshProfile } = await supabase.from('profiles').select('*').eq('id', student.id).single();
+    if (freshProfile) {
+      setSelectedStudent(freshProfile as Profile);
+      setEditCustomPrice(freshProfile.custom_subscription_price?.toString() || '');
+    }
+
+        // NOUVEAU : Récupération du forfait ACTIF ou À VENIR dans la table subscriptions
+    const today = new Date().toISOString().split('T')[0]; // Format AAAA-MM-JJ
+
+    // 1. On cherche d'abord un forfait actif aujourd'hui
+    let { data: activeSub } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('profile_id', student.id)
+      .lte('start_date', today)
+      .gte('end_date', today)
+      .maybeSingle();
+
+    if (!activeSub) {
+      // 2. Si pas de forfait actif, on cherche le prochain forfait à venir (ex: forfait d'été)
+      const { data: upcomingSub } = await supabase
+        .from('subscriptions')
+        .select('*')
+        .eq('profile_id', student.id)
+        .gte('start_date', today) // La date de début est dans le futur
+        .order('start_date', { ascending: true }) // On prend le plus proche
+        .limit(1)
+        .maybeSingle();
+
+      activeSub = upcomingSub; // On l'utilise comme forfait affiché
+    }
+
+    if (activeSub) {
+      // Un forfait (actif ou à venir) a été trouvé
+      setEditSubscription(activeSub.type);
+      setEditSessionsLeft(activeSub.sessions_left);
+    } else {
+      // Vraiment aucun forfait (passé, présent ou futur)
+      setEditSubscription('aucun');
+      setEditSessionsLeft(0);
+    }
   }
 
   const handleLogin = async (e: React.FormEvent) => { e.preventDefault(); setErrorLogin(''); const { error } = await supabase.auth.signInWithPassword({ email, password }); if (error) { setErrorLogin(error.message) } else { setLoading(true); window.location.reload() } }
   const handleLogout = async () => { await supabase.auth.signOut(); window.location.href = '/dashboard' }
 
   const handleUpdateSubscription = async () => {
-    if (!selectedStudent) return; setSaving(true)
-      const customPrice = editCustomPrice ? parseFloat(editCustomPrice) : null;
-    const creneauId = editSubscription === 'annuel' ? selectedStudent.creneau_id : null;
-    const { error } = await supabase.rpc('update_student_subscription', { target_user_id: selectedStudent.id, new_sub_type: editSubscription, new_sessions: editSessionsLeft, p_creneau_id: creneauId, p_custom_price: customPrice, p_summer_access: selectedStudent.summer_access || false })
-    if (!error) {
-      const updatedStudentData = { ...selectedStudent, subscription_type: editSubscription, sessions_left: editSessionsLeft, creneau_id: creneauId, custom_subscription_price: customPrice, summer_access: selectedStudent.summer_access || false };
-      setSelectedStudent(updatedStudentData); setProfiles(profiles.map(p => p.id === selectedStudent.id ? updatedStudentData : p)); alert('Forfait mis à jour !')
-    } else { alert('Erreur: ' + error.message) }
-    setSaving(false)
-  }
+    if (!selectedStudent) return;
+    setSaving(true);
+    try {
+      // 1. On met à jour le prix custom sur le profil (si besoin)
+      await supabase
+      .from('profiles')
+      .update({ custom_subscription_price: parseFloat(editCustomPrice) || null })
+      .eq('id', selectedStudent.id);
+
+      // 2. On cherche s'il y a déjà un forfait actif pour cet élève
+      const today = new Date().toISOString().split('T')[0];
+      const { data: activeSub } = await supabase
+      .from('subscriptions')
+      .select('id')
+      .eq('profile_id', selectedStudent.id)
+      .lte('start_date', today)
+      .gte('end_date', today)
+      .maybeSingle();
+
+      // Préparation des dates du forfait (Année scolaire en cours)
+      // Si le forfait contient "_ete", on le met sur l'été, sinon sur l'année
+      let startDate = '2025-09-01';
+      let endDate = '2026-08-31';
+      if (editSubscription.includes('_ete')) {
+        startDate = '2026-07-01';
+        endDate = '2026-08-31';
+      }
+
+      const subData = {
+        profile_id: selectedStudent.id,
+        type: editSubscription,
+        sessions_left: editSubscription === 'annuel' ? 33 : (parseInt(String(editSessionsLeft)) || 0),
+        start_date: startDate,
+        end_date: endDate
+      };
+
+      if (activeSub) {
+        // MISE À JOUR du forfait existant
+        const { error } = await supabase.from('subscriptions').update(subData).eq('id', activeSub.id);
+        if (error) throw error;
+      } else {
+        // CRÉATION d'un nouveau forfait
+        const { error } = await supabase.from('subscriptions').insert(subData);
+        if (error) throw error;
+      }
+
+      alert('Forfait mis à jour avec succès !');
+      await selectStudent(selectedStudent); // On rafraîchit les données à l'écran
+
+    } catch (error: any) {
+      alert('Erreur de sauvegarde : ' + error.message);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleAddCreation = async (e: React.FormEvent) => {
     e.preventDefault(); if (!selectedStudent || !newCreation.weight_kg) return; setSaving(true)
@@ -132,6 +229,58 @@ export default function AdminPage() {
     if (!error && data) { setCreations([data, ...creations]); setNewCreation({ piece_name: '', weight_kg: '', firing_passes: 1 }) } else { alert('Erreur: ' + error?.message) }
     setSaving(false)
   }
+
+  const handleDeleteCreation = async (creationId: string) => {
+    if (!selectedStudent) return;
+    if (!confirm("Supprimer cette création ?")) return;
+    setSaving(true)
+    const { error } = await supabase.from('creations').delete().eq('id', creationId)
+    if (!error) {
+      setCreations(creations.filter(c => c.id !== creationId))
+      // Rafraîchir le profil pour mettre à jour le solde
+      await selectStudent(selectedStudent)
+    } else { alert('Erreur : ' + error.message) }
+    setSaving(false)
+  }
+
+  const handleDeletePaiement = async (paiementId: string) => {
+    if (!selectedStudent) return;
+    if (!confirm("Supprimer ce paiement ?")) return;
+
+    try {
+      setSaving(true);
+
+      // On ajoute .select() pour forcer Supabase à nous dire ce qu'il a supprimé (ou non)
+      const { error, data } = await supabase
+      .from('paiements')
+      .delete()
+      .eq('id', paiementId)
+      .select();
+
+      if (error) {
+        // Si Supabase renvoie une erreur, on l'affiche clairement
+        alert('Erreur Supabase : ' + error.message);
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        // Si aucune ligne n'a été supprimée, c'est que l'ID n'existe pas ou que les droits bloquent
+        alert("Aucun paiement supprimé. Vérifiez les droits RLS dans Supabase.");
+        return;
+      }
+
+      // Si on arrive ici, la suppression a fonctionné
+      setPaiements(paiements.filter(p => p.id !== paiementId));
+      await selectStudent(selectedStudent);
+
+    } catch (err: any) {
+      // Erreur JavaScript inattendue
+      alert('Erreur inattendue : ' + err.message);
+    } finally {
+      // Quoi qu'il arrive, on arrête le chargement
+      setSaving(false);
+    }
+  };
 
   const handleAddPaiement = async (e: React.FormEvent) => {
     e.preventDefault(); if (!selectedStudent || !newPaiement.montant) return; setSaving(true)
@@ -180,7 +329,7 @@ export default function AdminPage() {
 
                 // Gestion des forfaits classique année
                 switch (selectedStudent.subscription_type) {
-                  case 'annuel': return isMinor ? prices.tarif_annuel_enfant : prices.tarif_annuelle_adulte
+                  case 'annuel': return isMinor ? prices.tarif_annuel_enfant : prices.tarif_annuel_adulte
                   case '1_seance': return isMinor ? prices.tarif_seance_unique_enfant : prices.tarif_seance_unique_adulte
                   case '3_seances': return isMinor ? prices.tarif_3_seances_enfant : prices.tarif_3_seances_adulte
                   case '5_seances': return isMinor ? prices.tarif_5_seances_enfant : prices.tarif_5_seances_adulte
@@ -236,42 +385,163 @@ export default function AdminPage() {
           <div className="bg-white p-6 rounded-2xl shadow-md border border-green-100">
           <div className="flex justify-between items-start mb-4"><div><h2 className="text-2xl font-bold text-green-800">{selectedStudent.first_name} {selectedStudent.last_name}</h2><p className="text-sm text-gray-500">{selectedStudent.email} {selectedStudent.is_minor && <span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full text-xs ml-2">Mineur</span>}</p></div><button onClick={handleResetPassword} className="text-xs bg-blue-50 text-blue-700 px-3 py-1 rounded hover:bg-blue-100 transition">Réinitialiser MDP</button></div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-          <div><label className="block text-sm font-medium text-gray-700 mb-1">Forfait</label><select value={editSubscription} onChange={(e) => setEditSubscription(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg bg-white text-gray-900"><option value="annuel">Annuel</option><option value="3_seances">3 Séances</option><option value="5_seances">5 Séances</option><option value="10_seances">10 Séances</option></select></div>
+          <div><label className="block text-sm font-medium text-gray-700 mb-1">Forfait</label><select value={editSubscription} onChange={(e) => setEditSubscription(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg bg-white text-gray-900">
+          <option value="aucun">Aucun forfait actif</option>
+          <option value="annuel">Annuel</option>
+          <option value="1_seance">1 Séance</option>
+          <option value="3_seances">3 Séances</option>
+          <option value="5_seances">5 Séances</option>
+          <option value="10_seances">10 Séances</option>
+          {/* AJOUT DES FORFAITS ÉTÉ */}
+          <option value="1_seance_ete">1 Séance (Été)</option>
+          <option value="3_seances_ete">3 Séances (Été)</option>
+          <option value="5_seances_ete">5 Séances (Été)</option>
+          <option value="10_seances_ete">10 Séances (Été)</option>
+          </select></div>
           <div><label className="block text-sm font-medium text-gray-700 mb-1">Séances restantes</label><input type="number" value={editSessionsLeft} onChange={(e) => setEditSessionsLeft(parseInt(e.target.value) || 0)} className="w-full p-2 border border-gray-300 rounded-lg bg-white text-gray-900" disabled={editSubscription === 'annuel'} /></div>
           <button onClick={handleUpdateSubscription} disabled={saving} className="bg-green-700 text-white px-4 py-2 rounded-lg hover:bg-green-800 transition font-bold disabled:opacity-50">{saving ? 'Sauvegarde...' : 'Mettre à jour forfait'}</button>
           </div>
+
           <div className="mt-4 pt-4 border-t">
-          <div className="flex items-center gap-2 mt-2"><input type="checkbox" checked={selectedStudent.summer_access || false} onChange={(e) => setSelectedStudent({...selectedStudent, summer_access: e.target.checked})} className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500" /><label className="text-sm font-medium text-gray-700">Accès Cours d'Été autorisé</label></div>
-          <div className="flex items-center gap-2 mt-2"><input type="number" value={editCustomPrice} onChange={(e) => setEditCustomPrice(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg bg-white text-gray-900" placeholder="Prix personnalisé (Geste commercial)" /><span className="text-sm text-gray-500">€</span></div>
+          <div className="flex items-center gap-2 mt-2">
+          <input type="number" value={editCustomPrice} onChange={(e) => setEditCustomPrice(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg bg-white text-gray-900" placeholder="Prix personnalisé (Geste commercial)" />
+          <span className="text-sm text-gray-500">€</span>
+          </div>
           </div>
           </div>
 
-          <div className={`p-4 rounded-xl shadow-sm border ${soldeDu > 0 ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}><div className="flex justify-between items-center"><div><p className="text-sm font-medium text-gray-700">Solde dû par l'élève</p><p className="text-xs text-gray-500 mt-1">Forfait ({getSubscriptionPrice().toFixed(2)}€) + Créations ({totalCreations.toFixed(2)}€) - Paiements ({totalPaiements.toFixed(2)}€)</p></div><p className={`text-2xl font-bold ${soldeDu > 0 ? 'text-red-700' : 'text-green-700'}`}>{soldeDu > 0 ? `${soldeDu.toFixed(2)}€` : 'Soldé ✓'}</p></div></div>
+          <div className={`p-4 rounded-xl shadow-sm border ${(soldeDu || 0) > 0 ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
+          <div className="flex justify-between items-center">
+          <div>
+          <p className="text-sm font-medium text-gray-700">Solde dû par l'élève</p>
+          <p className="text-xs text-gray-500 mt-1">
+          Forfait ({(getSubscriptionPrice() || 0).toFixed(2)}€) + Créations ({(totalCreations || 0).toFixed(2)}€) - Paiements ({(totalPaiements || 0).toFixed(2)}€)
+          </p>
+          </div>
+          <p className={`text-2xl font-bold ${(soldeDu || 0) > 0 ? 'text-red-700' : 'text-green-700'}`}>
+          {(soldeDu || 0) > 0 ? `${(soldeDu || 0).toFixed(2)}€` : 'Soldé ✓'}
+          </p>
+          </div>
+          </div>
 
           <div className="grid md:grid-cols-2 gap-6">
           <div className="bg-white p-6 rounded-2xl shadow-md border border-green-100">
           <h3 className="text-lg font-bold text-green-800 mb-4">Créations ({creations.length})</h3>
           <form onSubmit={handleAddCreation} className="space-y-2 mb-4 bg-gray-50 p-3 rounded-lg"><input type="text" placeholder="Nom de la pièce (opt.)" value={newCreation.piece_name} onChange={(e) => setNewCreation({...newCreation, piece_name: e.target.value})} className="w-full p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm" /><div className="flex space-x-2"><input type="number" step="1" placeholder="Poids (en g)" value={newCreation.weight_kg} onChange={(e) => setNewCreation({...newCreation, weight_kg: e.target.value})} className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm" required /><select value={newCreation.firing_passes} onChange={(e) => setNewCreation({...newCreation, firing_passes: parseInt(e.target.value)})} className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm"><option value={1}>1 cuisson</option><option value={2}>2 cuissons</option></select></div><button type="submit" disabled={saving} className="w-full bg-green-600 text-white p-2 rounded hover:bg-green-700 text-sm font-bold disabled:opacity-50">Ajouter</button></form>
-          <div className="space-y-2 max-h-60 overflow-y-auto">
+
+                    <div className="space-y-2 max-h-60 overflow-y-auto">
           {creations.map(c => (
             <div key={c.id} className="text-sm p-2 bg-gray-50 rounded border">
             {editingCreationId === c.id ? (
-              <div className="space-y-2"><input type="text" value={editCreationName} onChange={(e) => setEditCreationName(e.target.value)} className="w-full p-1 border border-gray-300 rounded bg-white text-gray-900" /><div className="flex gap-2"><input type="number" step="1" value={editCreationWeight} onChange={(e) => setEditCreationWeight(e.target.value)} className="w-1/2 p-1 border border-gray-300 rounded bg-white text-gray-900" /><select value={editCreationPasses} onChange={(e) => setEditCreationPasses(parseInt(e.target.value))} className="w-1/2 p-1 border border-gray-300 rounded bg-white text-gray-900"><option value={1}>1 cuisson</option><option value={2}>2 cuissons</option></select></div><div className="flex gap-2"><button onClick={() => handleUpdateCreation(c.id)} disabled={saving} className="w-full bg-green-600 text-white p-1 rounded text-xs font-bold hover:bg-green-700 disabled:opacity-50">{saving ? 'Sauvegarde...' : 'Valider'}</button><button onClick={() => setEditingCreationId(null)} className="w-full bg-gray-300 text-gray-800 p-1 rounded text-xs font-bold hover:bg-gray-400">Annuler</button></div></div>
+              // --- MODE ÉDITION ---
+              <div className="space-y-2">
+              <input type="text" value={editCreationName} onChange={(e) => setEditCreationName(e.target.value)} className="w-full p-1 border border-gray-300 rounded bg-white text-gray-900" />
+              <div className="flex gap-2">
+              <input type="number" step="1" value={editCreationWeight} onChange={(e) => setEditCreationWeight(e.target.value)} className="w-1/2 p-1 border border-gray-300 rounded bg-white text-gray-900" />
+              <select value={editCreationPasses} onChange={(e) => setEditCreationPasses(parseInt(e.target.value))} className="w-1/2 p-1 border border-gray-300 rounded bg-white text-gray-900">
+              <option value={1}>1 cuisson</option>
+              <option value={2}>2 cuissons</option>
+              </select>
+              </div>
+              <div className="flex gap-2">
+              <button onClick={() => handleUpdateCreation(c.id)} disabled={saving} className="w-full bg-green-600 text-white p-1 rounded text-xs font-bold hover:bg-green-700 disabled:opacity-50">
+              {saving ? 'Sauvegarde...' : 'Valider'}
+              </button>
+              <button onClick={() => setEditingCreationId(null)} className="w-full bg-gray-300 text-gray-800 p-1 rounded text-xs font-bold hover:bg-gray-400">
+              Annuler
+              </button>
+              </div>
+              </div>
             ) : (
-              <div className="flex justify-between items-center"><span className="text-gray-800 font-medium">{c.piece_name || 'Sans nom'} <span className="text-gray-500 font-normal">({Math.round(c.weight_kg * 1000)}g, {c.firing_passes} cuis.)</span></span><div className="flex items-center gap-2"><span className="font-bold text-green-700">{c.cost.toFixed(2)}€</span><button onClick={() => startEditingCreation(c)} className="text-blue-500 hover:text-blue-700 text-base" title="Modifier">✏️</button></div></div>
+              // --- MODE AFFICHAGE NORMAL ---
+              <div className="flex justify-between items-center">
+              <span className="text-gray-800 font-medium">
+              {c.piece_name || 'Sans nom'} <span className="text-gray-500 font-normal">({Math.round(c.weight_kg * 1000)}g, {c.firing_passes} cuis.)</span>
+              </span>
+              <div className="flex items-center gap-2">
+              <span className="font-bold text-green-700">{c.cost.toFixed(2)}€</span>
+              <button onClick={() => startEditingCreation(c)} className="text-blue-500 hover:text-blue-700 text-base" title="Modifier">✏️</button>
+              <button onClick={() => handleDeleteCreation(c.id)} className="text-red-500 hover:text-red-700 text-base" title="Supprimer">🗑️</button>
+              </div>
+              </div>
             )}
             </div>
           ))}
           </div>
           </div>
 
+          {/* DÉBUT DE LA CARTE PAIEMENTS */}
           <div className="bg-white p-6 rounded-2xl shadow-md border border-green-100">
           <h3 className="text-lg font-bold text-green-800 mb-4">Paiements ({paiements.length})</h3>
-          <form onSubmit={handleAddPaiement} className="space-y-2 mb-4 bg-gray-50 p-3 rounded-lg"><div className="flex space-x-2"><input type="number" step="0.01" placeholder="Montant (€)" value={newPaiement.montant} onChange={(e) => setNewPaiement({...newPaiement, montant: e.target.value})} className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm" required /><select value={newPaiement.mode} onChange={(e) => setNewPaiement({...newPaiement, mode: e.target.value})} className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm"><option value="especes">Espèces</option><option value="cb">CB</option><option value="cheque">Chèque</option><option value="wero">Wero</option></select></div><div className="flex space-x-2"><input type="date" value={newPaiement.date_paiement} onChange={(e) => setNewPaiement({...newPaiement, date_paiement: e.target.value})} className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm" required /><input type="text" placeholder="Note (opt.)" value={newPaiement.note} onChange={(e) => setNewPaiement({...newPaiement, note: e.target.value})} className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm" /></div><button type="submit" disabled={saving} className="w-full bg-blue-600 text-white p-2 rounded hover:bg-blue-700 text-sm font-bold disabled:opacity-50">Enregistrer paiement</button></form>
+
+          {/* Le formulaire s'ouvre ici et contient tout ce qui sert à l'ajout */}
+          <form onSubmit={handleAddPaiement} className="space-y-2 mb-4 bg-gray-50 p-3 rounded-lg">
+
+          <div className="flex space-x-2">
+          <input
+          type="number" step="0.01" placeholder="Montant (€)"
+          value={newPaiement.montant}
+          onChange={(e) => setNewPaiement({...newPaiement, montant: e.target.value})}
+          className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm"
+          required
+          />
+          <select
+          value={newPaiement.mode}
+          onChange={(e) => setNewPaiement({...newPaiement, mode: e.target.value})}
+          className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm"
+          >
+          <option value="especes">Espèces</option>
+          <option value="cb">CB</option>
+          <option value="cheque">Chèque</option>
+          <option value="wero">Wero</option>
+          </select>
+          </div>
+
+          <div className="flex space-x-2">
+          <input
+          type="date"
+          value={newPaiement.date_paiement}
+          onChange={(e) => setNewPaiement({...newPaiement, date_paiement: e.target.value})}
+          className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm"
+          required
+          />
+          <input
+          type="text" placeholder="Note (opt.)"
+          value={newPaiement.note}
+          onChange={(e) => setNewPaiement({...newPaiement, note: e.target.value})}
+          className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm"
+          />
+          </div>
+
+          <button
+          type="submit"
+          disabled={saving}
+          className="w-full bg-blue-600 text-white p-2 rounded hover:bg-blue-700 text-sm font-bold disabled:opacity-50"
+          >
+          Enregistrer paiement
+          </button>
+
+          </form>{/* Le formulaire se ferme correctement ici */}
+
+          {/* En dessous, la liste des paiements existants */}
           <div className="space-y-2 max-h-60 overflow-y-auto">
           {paiements.map(p => (
-            <div key={p.id} className="flex justify-between items-center text-sm p-2 bg-gray-50 rounded border"><div><span className="font-bold text-blue-700">{p.montant.toFixed(2)}€</span><span className="text-gray-500 ml-2">({p.mode})</span></div><div className="text-right"><span className="text-gray-800">{new Date(p.date_paiement).toLocaleDateString('fr-FR')}</span>{p.note && <p className="text-xs text-gray-400 italic">{p.note}</p>}</div></div>
+            <div key={p.id} className="flex justify-between items-center text-sm p-2 bg-gray-50 rounded border">
+            <div>
+            <span className="font-bold text-blue-700">{(p.montant || 0).toFixed(2)}€</span>
+            <span className="text-gray-500 ml-2">({p.mode})</span>
+            </div>
+            <div className="flex items-center gap-2">
+            <div className="text-right">
+            <span className="text-gray-800">{new Date(p.date_paiement).toLocaleDateString('fr-FR')}</span>
+            {p.note && <p className="text-xs text-gray-400 italic">{p.note}</p>}
+            </div>
+            {/* NOUVEAU BOUTON ANNULER PAIEMENT */}
+            <button onClick={() => handleDeletePaiement(p.id)} className="text-red-500 hover:text-red-700 text-base" title="Annuler ce paiement">🗑️</button>
+            </div>
+            </div>
           ))}
+
           </div>
           </div>
           </div>
@@ -301,13 +571,48 @@ export default function AdminPage() {
         <div className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {(() => {
-          const totalInscriptions = profiles.reduce((sum, p) => { if (!prices) return sum; const isMinor = p.is_minor; switch (p.subscription_type) { case 'annuel': return sum + (isMinor ? prices.tarif_annuel_enfant : prices.tarif_annuelle_adulte); case '3_seances': return sum + (isMinor ? prices.tarif_3_seances_enfant : prices.tarif_3_seances_adulte); case '5_seances': return sum + (isMinor ? prices.tarif_5_seances_enfant : prices.tarif_5_seances_adulte); case '10_seances': return sum + (isMinor ? prices.tarif_10_seances_enfant : prices.tarif_10_seances_adulte); default: return sum; } }, 0);
-          const totalCuis = yearCreations.reduce((sum: number, c: any) => sum + c.cost, 0);
-          const totalPay = yearPaiements.reduce((sum: number, p: any) => sum + p.montant, 0);
+          const totalInscriptions = profiles.reduce((sum, p) => {
+            if (!prices) return sum;
+
+            // On cherche le forfait de l'élève qui correspond à l'année en cours (se termine après sept 2025)
+            const activeSub = p.subscriptions?.find((s: any) => s.end_date >= '2025-09-01');
+
+            if (!activeSub) return sum; // L'élève n'a pas de forfait pour cette année
+
+            const isMinor = p.is_minor;
+            let price = 0;
+
+            switch (activeSub.type) {
+              case 'annuel': price = isMinor ? Number(prices.tarif_annuel_enfant) : Number(prices.tarif_annuel_adulte); break;
+              case '1_seance': price = isMinor ? Number(prices.tarif_seance_unique_enfant) : Number(prices.tarif_seance_unique_adulte); break;
+              case '3_seances': price = isMinor ? Number(prices.tarif_3_seances_enfant) : Number(prices.tarif_3_seances_adulte); break;
+              case '5_seances': price = isMinor ? Number(prices.tarif_5_seances_enfant) : Number(prices.tarif_5_seances_adulte); break;
+              case '10_seances': price = isMinor ? Number(prices.tarif_10_seances_enfant) : Number(prices.tarif_10_seances_adulte); break;
+              // ÉTÉ
+              case '1_seance_ete': price = Number(prices.tarif_seance_unique_adulte); break;
+              case '3_seances_ete': price = Number(prices.tarif_3_seances_adulte); break;
+              case '5_seances_ete': price = Number(prices.tarif_5_seances_adulte); break;
+              case '10_seances_ete': price = Number(prices.tarif_10_seances_adulte); break;
+              default: price = 0;
+            }
+            // --- DEBUG : On vérifie si le prix est NaN ---
+            if (isNaN(price)) {
+              console.log("⚠️ ERREUR NaN pour :", p.first_name, p.last_name, "| Forfait:", p.subscription_type, "| Mineur:", isMinor);
+            }
+
+            return sum + (price || 0); // Sécurité : si price est undefined, on ajoute 0
+          }, 0);
+
+
+          // On sécurise aussi les autres totaux au cas où des données manqueraient
+          const totalCuis = yearCreations.reduce((sum: number, c: any) => sum + (c.cost || 0), 0);
+          const totalPay = yearPaiements.reduce((sum: number, p: any) => sum + (p.montant || 0), 0);
           const solde = totalInscriptions + totalCuis - totalPay;
-          const totalKg = yearCreations.reduce((sum: number, c: any) => sum + c.weight_kg, 0);
+          const totalKg = yearCreations.reduce((sum: number, c: any) => sum + (c.weight_kg || 0), 0);
+
           return (<><div className="bg-white p-4 rounded-xl shadow-sm border text-center"><p className="text-xs text-gray-500 uppercase font-bold">Inscriptions</p><p className="text-2xl font-bold text-green-700 mt-1">{totalInscriptions.toFixed(2)}€</p></div><div className="bg-white p-4 rounded-xl shadow-sm border text-center"><p className="text-xs text-gray-500 uppercase font-bold">Cuissons</p><p className="text-2xl font-bold text-blue-700 mt-1">{totalCuis.toFixed(2)}€</p><p className="text-xs text-gray-400 mt-1">{totalKg.toFixed(1)} kg</p></div><div className="bg-white p-4 rounded-xl shadow-sm border text-center"><p className="text-xs text-gray-500 uppercase font-bold">Encaissé</p><p className="text-2xl font-bold text-green-500 mt-1">{totalPay.toFixed(2)}€</p></div><div className={`p-4 rounded-xl shadow-sm border text-center ${solde > 0 ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}><p className="text-xs text-gray-500 uppercase font-bold">Solde dû total</p><p className={`text-2xl font-bold mt-1 ${solde > 0 ? 'text-red-600' : 'text-green-600'}`}>{solde.toFixed(2)}€</p></div></>)
         })()}
+
         </div>
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100"><h3 className="font-bold text-lg text-green-800 mb-4">Solde des élèves ({profiles.length})</h3><div className="overflow-x-auto"><table className="w-full text-sm text-left"><thead className="text-xs text-gray-500 uppercase border-b"><tr><th className="py-3 px-2">Nom</th><th className="py-3 px-2">Forfait</th><th className="py-3 px-2">Séances rest.</th></tr></thead><tbody>{profiles.map(p => (<tr key={p.id} className="border-b hover:bg-gray-50"><td className="py-3 px-2 font-medium text-gray-900">{p.last_name} {p.first_name}</td><td className="py-3 px-2 text-gray-600">{p.subscription_type.replace('_', ' ')}</td><td className="py-3 px-2 text-gray-600">{p.subscription_type === 'annuel' ? 'Illimité' : p.sessions_left}</td></tr>))}</tbody></table></div></div>
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100"><h3 className="font-bold text-lg text-green-800 mb-4">Créations de l'année ({yearCreations.length} pièces)</h3>{yearCreations.length === 0 ? <p className="text-sm text-gray-400">Aucune création.</p> : (<div className="max-h-96 overflow-y-auto space-y-2">{yearCreations.map((c: any) => (<div key={c.id} className="flex justify-between items-center text-sm bg-gray-50 p-2 rounded border"><div><span className="font-medium text-gray-800">{c.piece_name || 'Sans nom'}</span><span className="text-gray-400 ml-2">par {c.profiles?.first_name} {c.profiles?.last_name}</span></div><div className="text-right"><span className="text-gray-600 mr-4">{Math.round(c.weight_kg * 1000)}g / {c.firing_passes} cuis.</span><span className="font-bold text-blue-700">{c.cost.toFixed(2)}€</span></div></div>))}</div>)}</div>
