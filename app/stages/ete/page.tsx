@@ -49,30 +49,30 @@ export default function SummerCoursePage() {
         />
         </div>
 
-        {/* Texte et Tarifs */}
-        <div className="md:w-1/2 p-8 md:p-12 flex flex-col justify-center space-y-6">
-        <div className="inline-block bg-yellow-100 text-yellow-800 px-4 py-1 rounded-full text-sm font-bold w-fit">
+        {/* Texte et Tarifs - Réduits et espacés */}
+        <div className="md:w-1/2 p-6 md:p-8 flex flex-col space-y-4">
+        <div className="inline-block bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-xs font-bold w-fit">
         Ouvert à tous
         </div>
-        <h3 className="text-3xl font-bold text-green-800">
+        <h3 className="text-2xl font-bold text-green-800">
         Envie d'une pause créative cet été ?
         </h3>
-        <p className="text-gray-700 text-lg leading-relaxed">
+        <p className="text-gray-700 text-base leading-relaxed mb-6">
         Venez découvrir la faïence <strong>Ivoire, Rouge et Noire</strong>. Des moments de partage et de création accessibles à tous, pour un été 100% fait main.
         </p>
 
-        {/* GRILLE TARIFAIRE ÉTÉ */}
-        <div className="bg-green-50 p-6 rounded-xl border border-green-200">
-        <h4 className="font-bold text-green-800 text-lg mb-4 text-center">Tarifs Cours d'Été</h4>
-        <div className="space-y-2">
-        <div className="flex justify-between py-2 border-b border-green-200 text-gray-700"><span>1 séance</span><span className="font-bold text-green-800">40 €</span></div>
-        <div className="flex justify-between py-2 border-b border-green-200 text-gray-700"><span>3 séances</span><span className="font-bold text-green-800">110 €</span></div>
-        <div className="flex justify-between py-2 border-b border-green-200 text-gray-700"><span>5 séances</span><span className="font-bold text-green-800">150 €</span></div>
-        <div className="flex justify-between py-2 text-gray-700"><span>10 séances</span><span className="font-bold text-green-800">230 €</span></div>
+        {/* GRILLE TARIFAIRE ÉTÉ - Plus compacte */}
+        <div className="bg-green-50 p-4 rounded-xl border border-green-200">
+        <h4 className="font-bold text-green-800 text-base mb-3 text-center">Tarifs Cours d'Été</h4>
+        <div className="space-y-1">
+        <div className="flex justify-between py-1.5 border-b border-green-200 text-gray-700 text-sm"><span>1 séance</span><span className="font-bold text-green-800">40 €</span></div>
+        <div className="flex justify-between py-1.5 border-b border-green-200 text-gray-700 text-sm"><span>3 séances</span><span className="font-bold text-green-800">110 €</span></div>
+        <div className="flex justify-between py-1.5 border-b border-green-200 text-gray-700 text-sm"><span>5 séances</span><span className="font-bold text-green-800">150 €</span></div>
+        <div className="flex justify-between py-1.5 text-gray-700 text-sm"><span>10 séances</span><span className="font-bold text-green-800">230 €</span></div>
         </div>
         </div>
 
-        <Link href="/dashboard" className="inline-block bg-green-700 text-white font-bold py-3 px-6 rounded-lg hover:bg-green-800 transition text-center text-lg shadow-md">
+        <Link href="/dashboard" className="inline-block bg-green-700 text-white font-bold py-2.5 px-5 rounded-lg hover:bg-green-800 transition text-center text-base shadow-md mt-2">
         Réserver mes cours d'été
         </Link>
         </div>

@@ -34,6 +34,7 @@ export default function AdminPage() {
   const [selectedStudent, setSelectedStudent] = useState<Profile | null>(null)
   const [creations, setCreations] = useState<Creation[]>([])
   const [paiements, setPaiements] = useState<Paiement[]>([])
+  const [studentSubscriptions, setStudentSubscriptions] = useState<any[]>([])
 
   const [newCreation, setNewCreation] = useState({ piece_name: '', weight_kg: '', firing_passes: 1 })
   const [newPaiement, setNewPaiement] = useState({ montant: '', date_paiement: new Date().toISOString().split('T')[0], mode: 'especes', note: '' })
@@ -106,61 +107,60 @@ export default function AdminPage() {
 
   const selectStudent = async (student: Profile) => {
     setSelectedStudent(student);
-    // On initialise par défaut
     setEditSubscription('aucun');
     setEditSessionsLeft(0);
     setEditCustomPrice(student.custom_subscription_price?.toString() || '');
 
-    // Récupération des créations
     const { data: cData } = await supabase.from('creations').select('*').eq('profile_id', student.id).order('created_at', { ascending: false });
     if (cData) setCreations(cData);
 
-    // Récupération des paiements
     const { data: pData } = await supabase.from('paiements').select('*').eq('profile_id', student.id).order('date_paiement', { ascending: false });
     if (pData) setPaiements(pData);
 
-    // Récupération du profil frais (pour le prix custom et autres infos)
     const { data: freshProfile } = await supabase.from('profiles').select('*').eq('id', student.id).single();
     if (freshProfile) {
-      setSelectedStudent(freshProfile as Profile);
+      setSelectedStudent({ ...freshProfile, subscriptions: student.subscriptions || [] } as Profile);
       setEditCustomPrice(freshProfile.custom_subscription_price?.toString() || '');
     }
 
-        // NOUVEAU : Récupération du forfait ACTIF ou À VENIR dans la table subscriptions
-    const today = new Date().toISOString().split('T')[0]; // Format AAAA-MM-JJ
+    const today = new Date().toISOString().split('T')[0];
 
-    // 1. On cherche d'abord un forfait actif aujourd'hui
     let { data: activeSub } = await supabase
+    .from('subscriptions')
+    .select('*')
+    .eq('profile_id', student.id)
+    .lte('start_date', today)
+    .gte('end_date', today)
+    .maybeSingle();
+
+    if (!activeSub) {
+      const { data: upcomingSub } = await supabase
       .from('subscriptions')
       .select('*')
       .eq('profile_id', student.id)
-      .lte('start_date', today)
-      .gte('end_date', today)
+      .gte('start_date', today)
+      .order('start_date', { ascending: true })
+      .limit(1)
       .maybeSingle();
-
-    if (!activeSub) {
-      // 2. Si pas de forfait actif, on cherche le prochain forfait à venir (ex: forfait d'été)
-      const { data: upcomingSub } = await supabase
-        .from('subscriptions')
-        .select('*')
-        .eq('profile_id', student.id)
-        .gte('start_date', today) // La date de début est dans le futur
-        .order('start_date', { ascending: true }) // On prend le plus proche
-        .limit(1)
-        .maybeSingle();
-
-      activeSub = upcomingSub; // On l'utilise comme forfait affiché
+      activeSub = upcomingSub;
     }
 
     if (activeSub) {
-      // Un forfait (actif ou à venir) a été trouvé
       setEditSubscription(activeSub.type);
       setEditSessionsLeft(activeSub.sessions_left);
     } else {
-      // Vraiment aucun forfait (passé, présent ou futur)
       setEditSubscription('aucun');
       setEditSessionsLeft(0);
     }
+
+    const { data: subsData } = await supabase
+    .from('subscriptions')
+    .select('*')
+    .eq('profile_id', student.id)
+    .gte('end_date', today)
+    .order('start_date', { ascending: true });
+
+    setStudentSubscriptions(subsData || []);
   }
 
   const handleLogin = async (e: React.FormEvent) => { e.preventDefault(); setErrorLogin(''); const { error } = await supabase.auth.signInWithPassword({ email, password }); if (error) { setErrorLogin(error.message) } else { setLoading(true); window.location.reload() } }
@@ -170,51 +170,41 @@ export default function AdminPage() {
     if (!selectedStudent) return;
     setSaving(true);
     try {
-      // 1. On met à jour le prix custom sur le profil (si besoin)
-      await supabase
-      .from('profiles')
-      .update({ custom_subscription_price: parseFloat(editCustomPrice) || null })
-      .eq('id', selectedStudent.id);
+      const chosenType = editSubscription;
+      const chosenSessions = chosenType === 'annuel' ? 33 : (parseInt(String(editSessionsLeft)) || 0);
 
-      // 2. On cherche s'il y a déjà un forfait actif pour cet élève
-      const today = new Date().toISOString().split('T')[0];
-      const { data: activeSub } = await supabase
+      const now = new Date();
+      let startYear = now.getFullYear();
+      if (now.getMonth() + 1 < 9) startYear -= 1;
+
+      let startDate = '', endDate = '';
+      if (chosenType === 'annuel') { startDate = `${startYear}-09-01`; endDate = `${startYear + 1}-06-30`; }
+      else if (chosenType.includes('_ete')) { startDate = `${startYear + 1}-07-01`; endDate = `${startYear + 1}-08-31`; }
+      else { startDate = `${startYear}-09-01`; endDate = `${startYear + 1}-08-31`; }
+
+      const today = now.toISOString().split('T')[0];
+
+      const { data: existingSub } = await supabase
       .from('subscriptions')
       .select('id')
       .eq('profile_id', selectedStudent.id)
-      .lte('start_date', today)
+      .eq('type', chosenType)
       .gte('end_date', today)
       .maybeSingle();
 
-      // Préparation des dates du forfait (Année scolaire en cours)
-      // Si le forfait contient "_ete", on le met sur l'été, sinon sur l'année
-      let startDate = '2025-09-01';
-      let endDate = '2026-08-31';
-      if (editSubscription.includes('_ete')) {
-        startDate = '2026-07-01';
-        endDate = '2026-08-31';
-      }
-
-      const subData = {
-        profile_id: selectedStudent.id,
-        type: editSubscription,
-        sessions_left: editSubscription === 'annuel' ? 33 : (parseInt(String(editSessionsLeft)) || 0),
-        start_date: startDate,
-        end_date: endDate
-      };
-
-      if (activeSub) {
-        // MISE À JOUR du forfait existant
-        const { error } = await supabase.from('subscriptions').update(subData).eq('id', activeSub.id);
+      if (existingSub) {
+        const { error } = await supabase.from('subscriptions').update({
+          sessions_left: chosenSessions, start_date: startDate, end_date: endDate
+        }).eq('id', existingSub.id);
         if (error) throw error;
       } else {
-        // CRÉATION d'un nouveau forfait
-        const { error } = await supabase.from('subscriptions').insert(subData);
+        const { error } = await supabase.from('subscriptions').insert({
+          profile_id: selectedStudent.id, type: chosenType, sessions_left: chosenSessions, start_date: startDate, end_date: endDate
+        });
         if (error) throw error;
       }
 
-      alert('Forfait mis à jour avec succès !');
-      await selectStudent(selectedStudent); // On rafraîchit les données à l'écran
+      await selectStudent(selectedStudent);
 
     } catch (error: any) {
       alert('Erreur de sauvegarde : ' + error.message);
@@ -237,7 +227,6 @@ export default function AdminPage() {
     const { error } = await supabase.from('creations').delete().eq('id', creationId)
     if (!error) {
       setCreations(creations.filter(c => c.id !== creationId))
-      // Rafraîchir le profil pour mettre à jour le solde
       await selectStudent(selectedStudent)
     } else { alert('Erreur : ' + error.message) }
     setSaving(false)
@@ -246,40 +235,18 @@ export default function AdminPage() {
   const handleDeletePaiement = async (paiementId: string) => {
     if (!selectedStudent) return;
     if (!confirm("Supprimer ce paiement ?")) return;
-
     try {
       setSaving(true);
-
-      // On ajoute .select() pour forcer Supabase à nous dire ce qu'il a supprimé (ou non)
       const { error, data } = await supabase
       .from('paiements')
       .delete()
       .eq('id', paiementId)
       .select();
-
-      if (error) {
-        // Si Supabase renvoie une erreur, on l'affiche clairement
-        alert('Erreur Supabase : ' + error.message);
-        return;
-      }
-
-      if (!data || data.length === 0) {
-        // Si aucune ligne n'a été supprimée, c'est que l'ID n'existe pas ou que les droits bloquent
-        alert("Aucun paiement supprimé. Vérifiez les droits RLS dans Supabase.");
-        return;
-      }
-
-      // Si on arrive ici, la suppression a fonctionné
+      if (error) { alert('Erreur Supabase : ' + error.message); return; }
+      if (!data || data.length === 0) { alert("Aucun paiement supprimé. Vérifiez les droits RLS dans Supabase."); return; }
       setPaiements(paiements.filter(p => p.id !== paiementId));
       await selectStudent(selectedStudent);
-
-    } catch (err: any) {
-      // Erreur JavaScript inattendue
-      alert('Erreur inattendue : ' + err.message);
-    } finally {
-      // Quoi qu'il arrive, on arrête le chargement
-      setSaving(false);
-    }
+    } catch (err: any) { alert('Erreur inattendue : ' + err.message); } finally { setSaving(false); }
   };
 
   const handleAddPaiement = async (e: React.FormEvent) => {
@@ -319,23 +286,31 @@ export default function AdminPage() {
   const getSubscriptionPrice = () => {
     if (!prices || !selectedStudent) return 0
       if (selectedStudent.custom_subscription_price) return selectedStudent.custom_subscription_price
-        const isMinor = selectedStudent.is_minor
 
-        // Gestion des forfaits été (prix adultes fixes pour l'été)
-        if (selectedStudent.subscription_type === '1_seance_ete') return prices.tarif_seance_unique_adulte
-          if (selectedStudent.subscription_type === '3_seances_ete') return prices.tarif_3_seances_adulte
-            if (selectedStudent.subscription_type === '5_seances_ete') return prices.tarif_5_seances_adulte
-              if (selectedStudent.subscription_type === '10_seances_ete') return prices.tarif_10_seances_adulte
+        const today = new Date().toISOString().split('T')[0];
+    const activeSubs = selectedStudent.subscriptions?.filter((s: any) => s.end_date >= today) || [];
 
-                // Gestion des forfaits classique année
-                switch (selectedStudent.subscription_type) {
-                  case 'annuel': return isMinor ? prices.tarif_annuel_enfant : prices.tarif_annuel_adulte
-                  case '1_seance': return isMinor ? prices.tarif_seance_unique_enfant : prices.tarif_seance_unique_adulte
-                  case '3_seances': return isMinor ? prices.tarif_3_seances_enfant : prices.tarif_3_seances_adulte
-                  case '5_seances': return isMinor ? prices.tarif_5_seances_enfant : prices.tarif_5_seances_adulte
-                  case '10_seances': return isMinor ? prices.tarif_10_seances_enfant : prices.tarif_10_seances_adulte
-                  default: return 0
-                }
+    if (activeSubs.length === 0) return 0;
+
+    const isMinor = selectedStudent.is_minor;
+    let totalPrice = 0;
+
+    activeSubs.forEach((sub: any) => {
+      switch (sub.type) {
+        case 'annuel': totalPrice += isMinor ? Number(prices.tarif_annuel_enfant) : Number(prices.tarif_annuel_adulte); break;
+        case '1_seance': totalPrice += isMinor ? Number(prices.tarif_seance_unique_enfant) : Number(prices.tarif_seance_unique_adulte); break;
+        case '3_seances': totalPrice += isMinor ? Number(prices.tarif_3_seances_enfant) : Number(prices.tarif_3_seances_adulte); break;
+        case '5_seances': totalPrice += isMinor ? Number(prices.tarif_5_seances_enfant) : Number(prices.tarif_5_seances_adulte); break;
+        case '10_seances': totalPrice += isMinor ? Number(prices.tarif_10_seances_enfant) : Number(prices.tarif_10_seances_adulte); break;
+        case '1_seance_ete': totalPrice += Number(prices.tarif_seance_unique_adulte); break;
+        case '3_seances_ete': totalPrice += Number(prices.tarif_3_seances_adulte); break;
+        case '5_seances_ete': totalPrice += Number(prices.tarif_5_seances_adulte); break;
+        case '10_seances_ete': totalPrice += Number(prices.tarif_10_seances_adulte); break;
+        default: break;
+      }
+    });
+
+    return totalPrice;
   }
 
   const soldeDu = getSubscriptionPrice() + totalCreations - totalPaiements
@@ -349,33 +324,49 @@ export default function AdminPage() {
     }
 
     return (
-      <div className="min-h-screen bg-green-50 flex flex-col md:flex-row">
+      <div className="min-h-screen bg-gray-100 flex flex-col md:flex-row">
 
-      <div className="w-full md:w-1/3 bg-green-900 p-4 border-r overflow-y-auto h-screen text-white shadow-xl">
-      <div className="flex justify-between items-center mb-6"><div className="flex items-center gap-3"><Image src="/logo.png" alt="Logo" width={40} height={40} className="rounded-full" /><h1 className="text-xl font-bold text-yellow-300">Rêve de Porcelaine</h1></div><button onClick={handleLogout} className="text-xs bg-red-500 text-white px-2 py-1 rounded hover:bg-red-600">Déconnexion</button></div>
+      {/* COLONNE GAUCHE */}
+      <div className="w-full md:w-1/3 bg-green-800 text-white p-4 flex flex-col h-screen">
+      <div className="flex justify-between items-center mb-4">
+      <h2 className="text-xl font-bold">Mes élèves ({profiles.length})</h2>
+      <button onClick={handleLogout} className="text-xs bg-red-500 hover:bg-red-600 px-3 py-1 rounded font-bold transition">Déconnexion</button>
+      </div>
       <div className="mb-4">
-      <label className="text-xs text-green-300 block mb-1">Mes élèves ({profiles.length})</label>
-      <input type="text" placeholder="Rechercher..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full p-2 border border-green-700 rounded bg-green-800 text-white placeholder-green-400 text-sm" />
+      <input type="text" placeholder="Rechercher un élève..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full p-2 rounded-lg bg-green-700 text-white placeholder-green-300 border border-green-600 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
       </div>
-      <div className="space-y-2">
-      {profiles.filter(student => `${student.first_name} ${student.last_name}`.toLowerCase().includes(searchTerm.toLowerCase())).map(student => (
-        <button key={student.id} onClick={() => selectStudent(student)} className={`w-full text-left p-3 rounded-lg transition ${selectedStudent?.id === student.id ? 'bg-yellow-400 text-green-900 font-bold shadow-md' : 'bg-green-800 hover:bg-green-700 text-white border border-green-700'}`}>
-        <div className="font-semibold">{student.last_name} {student.first_name}</div>
-        <div className="text-xs flex justify-between mt-1 opacity-80"><span>{student.subscription_type.replace('_', ' ')}</span><span>{student.subscription_type !== 'annuel' ? `${student.sessions_left} rest.` : 'Annuel'} {student.subscription_type === 'annuel' ? getCreneauName(student.creneau_id) : ''}</span></div>
-        </button>
-      ))}
+      <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+      {profiles.filter(p => { if (!searchTerm) return true; const term = searchTerm.toLowerCase(); return p.first_name.toLowerCase().includes(term) || p.last_name.toLowerCase().includes(term); }).map(p => {
+        const today = new Date().toISOString().split('T')[0];
+        const activeSubs = p.subscriptions?.filter((s: any) => s.end_date >= today) || [];
+        const totalSessions = activeSubs.reduce((sum: number, s: any) => sum + (s.type === 'annuel' ? 0 : (s.sessions_left || 0)), 0);
+        return (
+          <div key={p.id} onClick={() => selectStudent(p)} className={`p-3 rounded-lg cursor-pointer transition ${selectedStudent?.id === p.id ? 'bg-yellow-400 text-green-900 font-bold shadow-lg' : 'bg-green-700 hover:bg-green-600'}`}>
+          <div className="flex justify-between items-center">
+          <div className="flex flex-col">
+          <p className="font-medium">{p.first_name} {p.last_name}</p>
+          <div className="flex flex-wrap gap-1 mt-1">
+          {activeSubs.length === 0 && <span className={`text-xs ${selectedStudent?.id === p.id ? 'text-green-800' : 'text-green-200'}`}>Aucun</span>}
+          {activeSubs.map(sub => (<span key={sub.id} className={`text-xs px-1.5 py-0.5 rounded ${selectedStudent?.id === p.id ? 'bg-green-800 text-yellow-300' : 'bg-green-600 text-green-100'}`}>{sub.type === 'annuel' ? 'Annuel' : sub.type.replaceAll('_', ' ').replaceAll('ete', 'Été')}</span>))}
+          </div>
+          </div>
+          <div className="text-right"><span className="text-sm font-bold">{activeSubs.some((s: any) => s.type === 'annuel') ? 'Illimité' : `${totalSessions} séances`}</span></div>
+          </div>
+          </div>
+        )
+      })}
       </div>
       </div>
 
+      {/* COLONNE DROITE */}
       <div className="w-full md:w-2/3 p-6 overflow-y-auto h-screen">
-
       <div className="flex space-x-4 mb-6 border-b border-green-200 pb-2">
       <button onClick={() => setActiveTab('eleves')} className={`px-4 py-2 font-bold rounded-t-lg transition ${activeTab === 'eleves' ? 'bg-white text-green-800 border border-b-white -mb-[1px]' : 'text-green-600 hover:text-green-800'}`}>Gestion Élève</button>
       <button onClick={() => setActiveTab('planning')} className={`px-4 py-2 font-bold rounded-t-lg transition ${activeTab === 'planning' ? 'bg-white text-green-800 border border-b-white -mb-[1px]' : 'text-green-600 hover:text-green-800'}`}>Planning & Sessions</button>
       <button onClick={() => { setActiveTab('bilan'); fetchYearSummary(); }} className={`px-4 py-2 font-bold rounded-t-lg transition ${activeTab === 'bilan' ? 'bg-white text-green-800 border border-b-white -mb-[1px]' : 'text-green-600 hover:text-green-800'}`}>📊 Bilan Annuel</button>
       </div>
 
-      {/* ONGLET GESTION ÉLÈVE */}
+      {/* ONGLET ELEVE */}
       {activeTab === 'eleves' && (
         <>
         {!selectedStudent ? (
@@ -385,163 +376,59 @@ export default function AdminPage() {
           <div className="bg-white p-6 rounded-2xl shadow-md border border-green-100">
           <div className="flex justify-between items-start mb-4"><div><h2 className="text-2xl font-bold text-green-800">{selectedStudent.first_name} {selectedStudent.last_name}</h2><p className="text-sm text-gray-500">{selectedStudent.email} {selectedStudent.is_minor && <span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full text-xs ml-2">Mineur</span>}</p></div><button onClick={handleResetPassword} className="text-xs bg-blue-50 text-blue-700 px-3 py-1 rounded hover:bg-blue-100 transition">Réinitialiser MDP</button></div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-          <div><label className="block text-sm font-medium text-gray-700 mb-1">Forfait</label><select value={editSubscription} onChange={(e) => setEditSubscription(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg bg-white text-gray-900">
-          <option value="aucun">Aucun forfait actif</option>
-          <option value="annuel">Annuel</option>
-          <option value="1_seance">1 Séance</option>
-          <option value="3_seances">3 Séances</option>
-          <option value="5_seances">5 Séances</option>
-          <option value="10_seances">10 Séances</option>
-          {/* AJOUT DES FORFAITS ÉTÉ */}
-          <option value="1_seance_ete">1 Séance (Été)</option>
-          <option value="3_seances_ete">3 Séances (Été)</option>
-          <option value="5_seances_ete">5 Séances (Été)</option>
-          <option value="10_seances_ete">10 Séances (Été)</option>
-          </select></div>
+          <div><label className="block text-sm font-medium text-gray-700 mb-1">Forfait</label><select value={editSubscription} onChange={(e) => { const newType = e.target.value; setEditSubscription(newType); if (newType === 'annuel') setEditSessionsLeft(33); else if (newType.includes('1_seance')) setEditSessionsLeft(1); else if (newType.includes('3_seances')) setEditSessionsLeft(3); else if (newType.includes('5_seances')) setEditSessionsLeft(5); else if (newType.includes('10_seances')) setEditSessionsLeft(10); else setEditSessionsLeft(0); }} className="w-full p-2 border border-gray-300 rounded-lg bg-white text-gray-900"><option value="aucun">Aucun forfait actif</option><option value="annuel">Annuel</option><option value="1_seance">1 Séance</option><option value="3_seances">3 Séances</option><option value="5_seances">5 Séances</option><option value="10_seances">10 Séances</option><option value="1_seance_ete">1 Séance (Été)</option><option value="3_seances_ete">3 Séances (Été)</option><option value="5_seances_ete">5 Séances (Été)</option><option value="10_seances_ete">10 Séances (Été)</option></select></div>
           <div><label className="block text-sm font-medium text-gray-700 mb-1">Séances restantes</label><input type="number" value={editSessionsLeft} onChange={(e) => setEditSessionsLeft(parseInt(e.target.value) || 0)} className="w-full p-2 border border-gray-300 rounded-lg bg-white text-gray-900" disabled={editSubscription === 'annuel'} /></div>
           <button onClick={handleUpdateSubscription} disabled={saving} className="bg-green-700 text-white px-4 py-2 rounded-lg hover:bg-green-800 transition font-bold disabled:opacity-50">{saving ? 'Sauvegarde...' : 'Mettre à jour forfait'}</button>
           </div>
+          <div className="mt-4 pt-4 border-t"><div className="flex items-center gap-2 mt-2"><input type="number" value={editCustomPrice} onChange={(e) => setEditCustomPrice(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg bg-white text-gray-900" placeholder="Prix personnalisé (Geste commercial)" /><span className="text-sm text-gray-500">€</span></div></div>
+          </div>
 
-          <div className="mt-4 pt-4 border-t">
-          <div className="flex items-center gap-2 mt-2">
-          <input type="number" value={editCustomPrice} onChange={(e) => setEditCustomPrice(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg bg-white text-gray-900" placeholder="Prix personnalisé (Geste commercial)" />
-          <span className="text-sm text-gray-500">€</span>
-          </div>
-          </div>
-          </div>
+          {studentSubscriptions.length > 0 && (
+            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+            <h4 className="text-sm font-bold text-blue-800 mb-3">Forfaits actifs de l'élève</h4>
+            <div className="space-y-2">
+            {studentSubscriptions.map(sub => (
+              <div key={sub.id} className="flex justify-between items-center bg-white p-2 rounded shadow-sm text-sm">
+              <div><span className="font-semibold text-gray-800">{sub.type === 'annuel' ? 'Annuel' : sub.type.includes('ete') ? sub.type.replace('_ete', ' Été').replace('_', ' ') : sub.type.replace('_', ' ')}</span><span className="text-xs text-gray-400 ml-2">(du {new Date(sub.start_date).toLocaleDateString('fr-FR')} au {new Date(sub.end_date).toLocaleDateString('fr-FR')})</span></div>
+              <span className="font-bold text-blue-600">{sub.type === 'annuel' ? 'Illimité' : `${sub.sessions_left} rest.`}</span>
+              </div>
+            ))}
+            </div>
+            </div>
+          )}
 
           <div className={`p-4 rounded-xl shadow-sm border ${(soldeDu || 0) > 0 ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
-          <div className="flex justify-between items-center">
-          <div>
-          <p className="text-sm font-medium text-gray-700">Solde dû par l'élève</p>
-          <p className="text-xs text-gray-500 mt-1">
-          Forfait ({(getSubscriptionPrice() || 0).toFixed(2)}€) + Créations ({(totalCreations || 0).toFixed(2)}€) - Paiements ({(totalPaiements || 0).toFixed(2)}€)
-          </p>
-          </div>
-          <p className={`text-2xl font-bold ${(soldeDu || 0) > 0 ? 'text-red-700' : 'text-green-700'}`}>
-          {(soldeDu || 0) > 0 ? `${(soldeDu || 0).toFixed(2)}€` : 'Soldé ✓'}
-          </p>
-          </div>
+          <div className="flex justify-between items-center"><div><p className="text-sm font-medium text-gray-700">Solde dû par l'élève</p><p className="text-xs text-gray-500 mt-1">Forfait ({(getSubscriptionPrice() || 0).toFixed(2)}€) + Créations ({(totalCreations || 0).toFixed(2)}€) - Paiements ({(totalPaiements || 0).toFixed(2)}€)</p></div><p className={`text-2xl font-bold ${(soldeDu || 0) > 0 ? 'text-red-700' : 'text-green-700'}`}>{(soldeDu || 0) > 0 ? `${(soldeDu || 0).toFixed(2)}€` : 'Soldé ✓'}</p></div>
           </div>
 
           <div className="grid md:grid-cols-2 gap-6">
           <div className="bg-white p-6 rounded-2xl shadow-md border border-green-100">
           <h3 className="text-lg font-bold text-green-800 mb-4">Créations ({creations.length})</h3>
           <form onSubmit={handleAddCreation} className="space-y-2 mb-4 bg-gray-50 p-3 rounded-lg"><input type="text" placeholder="Nom de la pièce (opt.)" value={newCreation.piece_name} onChange={(e) => setNewCreation({...newCreation, piece_name: e.target.value})} className="w-full p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm" /><div className="flex space-x-2"><input type="number" step="1" placeholder="Poids (en g)" value={newCreation.weight_kg} onChange={(e) => setNewCreation({...newCreation, weight_kg: e.target.value})} className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm" required /><select value={newCreation.firing_passes} onChange={(e) => setNewCreation({...newCreation, firing_passes: parseInt(e.target.value)})} className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm"><option value={1}>1 cuisson</option><option value={2}>2 cuissons</option></select></div><button type="submit" disabled={saving} className="w-full bg-green-600 text-white p-2 rounded hover:bg-green-700 text-sm font-bold disabled:opacity-50">Ajouter</button></form>
-
-                    <div className="space-y-2 max-h-60 overflow-y-auto">
+          <div className="space-y-2 max-h-60 overflow-y-auto">
           {creations.map(c => (
             <div key={c.id} className="text-sm p-2 bg-gray-50 rounded border">
             {editingCreationId === c.id ? (
-              // --- MODE ÉDITION ---
-              <div className="space-y-2">
-              <input type="text" value={editCreationName} onChange={(e) => setEditCreationName(e.target.value)} className="w-full p-1 border border-gray-300 rounded bg-white text-gray-900" />
-              <div className="flex gap-2">
-              <input type="number" step="1" value={editCreationWeight} onChange={(e) => setEditCreationWeight(e.target.value)} className="w-1/2 p-1 border border-gray-300 rounded bg-white text-gray-900" />
-              <select value={editCreationPasses} onChange={(e) => setEditCreationPasses(parseInt(e.target.value))} className="w-1/2 p-1 border border-gray-300 rounded bg-white text-gray-900">
-              <option value={1}>1 cuisson</option>
-              <option value={2}>2 cuissons</option>
-              </select>
-              </div>
-              <div className="flex gap-2">
-              <button onClick={() => handleUpdateCreation(c.id)} disabled={saving} className="w-full bg-green-600 text-white p-1 rounded text-xs font-bold hover:bg-green-700 disabled:opacity-50">
-              {saving ? 'Sauvegarde...' : 'Valider'}
-              </button>
-              <button onClick={() => setEditingCreationId(null)} className="w-full bg-gray-300 text-gray-800 p-1 rounded text-xs font-bold hover:bg-gray-400">
-              Annuler
-              </button>
-              </div>
-              </div>
+              <div className="space-y-2"><input type="text" value={editCreationName} onChange={(e) => setEditCreationName(e.target.value)} className="w-full p-1 border border-gray-300 rounded bg-white text-gray-900" /><div className="flex gap-2"><input type="number" step="1" value={editCreationWeight} onChange={(e) => setEditCreationWeight(e.target.value)} className="w-1/2 p-1 border border-gray-300 rounded bg-white text-gray-900" /><select value={editCreationPasses} onChange={(e) => setEditCreationPasses(parseInt(e.target.value))} className="w-1/2 p-1 border border-gray-300 rounded bg-white text-gray-900"><option value={1}>1 cuisson</option><option value={2}>2 cuissons</option></select></div><div className="flex gap-2"><button onClick={() => handleUpdateCreation(c.id)} disabled={saving} className="w-full bg-green-600 text-white p-1 rounded text-xs font-bold hover:bg-green-700 disabled:opacity-50">{saving ? 'Sauvegarde...' : 'Valider'}</button><button onClick={() => setEditingCreationId(null)} className="w-full bg-gray-300 text-gray-800 p-1 rounded text-xs font-bold hover:bg-gray-400">Annuler</button></div></div>
             ) : (
-              // --- MODE AFFICHAGE NORMAL ---
-              <div className="flex justify-between items-center">
-              <span className="text-gray-800 font-medium">
-              {c.piece_name || 'Sans nom'} <span className="text-gray-500 font-normal">({Math.round(c.weight_kg * 1000)}g, {c.firing_passes} cuis.)</span>
-              </span>
-              <div className="flex items-center gap-2">
-              <span className="font-bold text-green-700">{c.cost.toFixed(2)}€</span>
-              <button onClick={() => startEditingCreation(c)} className="text-blue-500 hover:text-blue-700 text-base" title="Modifier">✏️</button>
-              <button onClick={() => handleDeleteCreation(c.id)} className="text-red-500 hover:text-red-700 text-base" title="Supprimer">🗑️</button>
-              </div>
-              </div>
+              <div className="flex justify-between items-center"><span className="text-gray-800 font-medium">{c.piece_name || 'Sans nom'} <span className="text-gray-500 font-normal">({Math.round(c.weight_kg * 1000)}g, {c.firing_passes} cuis.)</span></span><div className="flex items-center gap-2"><span className="font-bold text-green-700">{c.cost.toFixed(2)}€</span><button onClick={() => startEditingCreation(c)} className="text-blue-500 hover:text-blue-700 text-base" title="Modifier">✏️</button><button onClick={() => handleDeleteCreation(c.id)} className="text-red-500 hover:text-red-700 text-base" title="Supprimer">🗑️</button></div></div>
             )}
             </div>
           ))}
           </div>
           </div>
 
-          {/* DÉBUT DE LA CARTE PAIEMENTS */}
           <div className="bg-white p-6 rounded-2xl shadow-md border border-green-100">
           <h3 className="text-lg font-bold text-green-800 mb-4">Paiements ({paiements.length})</h3>
-
-          {/* Le formulaire s'ouvre ici et contient tout ce qui sert à l'ajout */}
           <form onSubmit={handleAddPaiement} className="space-y-2 mb-4 bg-gray-50 p-3 rounded-lg">
-
-          <div className="flex space-x-2">
-          <input
-          type="number" step="0.01" placeholder="Montant (€)"
-          value={newPaiement.montant}
-          onChange={(e) => setNewPaiement({...newPaiement, montant: e.target.value})}
-          className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm"
-          required
-          />
-          <select
-          value={newPaiement.mode}
-          onChange={(e) => setNewPaiement({...newPaiement, mode: e.target.value})}
-          className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm"
-          >
-          <option value="especes">Espèces</option>
-          <option value="cb">CB</option>
-          <option value="cheque">Chèque</option>
-          <option value="wero">Wero</option>
-          </select>
-          </div>
-
-          <div className="flex space-x-2">
-          <input
-          type="date"
-          value={newPaiement.date_paiement}
-          onChange={(e) => setNewPaiement({...newPaiement, date_paiement: e.target.value})}
-          className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm"
-          required
-          />
-          <input
-          type="text" placeholder="Note (opt.)"
-          value={newPaiement.note}
-          onChange={(e) => setNewPaiement({...newPaiement, note: e.target.value})}
-          className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm"
-          />
-          </div>
-
-          <button
-          type="submit"
-          disabled={saving}
-          className="w-full bg-blue-600 text-white p-2 rounded hover:bg-blue-700 text-sm font-bold disabled:opacity-50"
-          >
-          Enregistrer paiement
-          </button>
-
-          </form>{/* Le formulaire se ferme correctement ici */}
-
-          {/* En dessous, la liste des paiements existants */}
+          <div className="flex space-x-2"><input type="number" step="0.01" placeholder="Montant (€)" value={newPaiement.montant} onChange={(e) => setNewPaiement({...newPaiement, montant: e.target.value})} className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm" required /><select value={newPaiement.mode} onChange={(e) => setNewPaiement({...newPaiement, mode: e.target.value})} className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm"><option value="especes">Espèces</option><option value="cb">CB</option><option value="cheque">Chèque</option><option value="wero">Wero</option></select></div>
+          <div className="flex space-x-2"><input type="date" value={newPaiement.date_paiement} onChange={(e) => setNewPaiement({...newPaiement, date_paiement: e.target.value})} className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm" required /><input type="text" placeholder="Note (opt.)" value={newPaiement.note} onChange={(e) => setNewPaiement({...newPaiement, note: e.target.value})} className="w-1/2 p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm" /></div>
+          <button type="submit" disabled={saving} className="w-full bg-blue-600 text-white p-2 rounded hover:bg-blue-700 text-sm font-bold disabled:opacity-50">Enregistrer paiement</button>
+          </form>
           <div className="space-y-2 max-h-60 overflow-y-auto">
           {paiements.map(p => (
-            <div key={p.id} className="flex justify-between items-center text-sm p-2 bg-gray-50 rounded border">
-            <div>
-            <span className="font-bold text-blue-700">{(p.montant || 0).toFixed(2)}€</span>
-            <span className="text-gray-500 ml-2">({p.mode})</span>
-            </div>
-            <div className="flex items-center gap-2">
-            <div className="text-right">
-            <span className="text-gray-800">{new Date(p.date_paiement).toLocaleDateString('fr-FR')}</span>
-            {p.note && <p className="text-xs text-gray-400 italic">{p.note}</p>}
-            </div>
-            {/* NOUVEAU BOUTON ANNULER PAIEMENT */}
-            <button onClick={() => handleDeletePaiement(p.id)} className="text-red-500 hover:text-red-700 text-base" title="Annuler ce paiement">🗑️</button>
-            </div>
-            </div>
+            <div key={p.id} className="flex justify-between items-center text-sm p-2 bg-gray-50 rounded border"><div><span className="font-bold text-blue-700">{(p.montant || 0).toFixed(2)}€</span><span className="text-gray-500 ml-2">({p.mode})</span></div><div className="flex items-center gap-2"><div className="text-right"><span className="text-gray-800">{new Date(p.date_paiement).toLocaleDateString('fr-FR')}</span>{p.note && <p className="text-xs text-gray-400 italic">{p.note}</p>}</div><button onClick={() => handleDeletePaiement(p.id)} className="text-red-500 hover:text-red-700 text-base" title="Annuler ce paiement">🗑️</button></div></div>
           ))}
-
           </div>
           </div>
           </div>
@@ -550,7 +437,7 @@ export default function AdminPage() {
         </>
       )}
 
-      {/* ONGLET PLANNING & SESSIONS */}
+      {/* ONGLET PLANNING */}
       {activeTab === 'planning' && (
         <div className="space-y-6">
         <div className="bg-white p-6 rounded-2xl shadow-md border border-green-100 flex flex-col md:flex-row justify-between items-center gap-4"><div><h2 className="text-xl font-bold text-green-800">Gestion du Planning</h2><p className="text-sm text-gray-500">Générer les sessions pour l'année scolaire (hors vacances scolaires et hors été).</p></div><button onClick={handleGenerateYear} disabled={generating} className="bg-yellow-500 text-green-900 px-6 py-3 rounded-lg font-bold hover:bg-yellow-400 transition disabled:opacity-50 shadow-md">{generating ? 'Génération en cours...' : "✨ Générer l'année"}</button></div>
@@ -566,56 +453,56 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* ONGLET BILAN ANNUEL */}
+      {/* ONGLET BILAN */}
       {activeTab === 'bilan' && (
         <div className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {(() => {
           const totalInscriptions = profiles.reduce((sum, p) => {
             if (!prices) return sum;
-
-            // On cherche le forfait de l'élève qui correspond à l'année en cours (se termine après sept 2025)
-            const activeSub = p.subscriptions?.find((s: any) => s.end_date >= '2025-09-01');
-
-            if (!activeSub) return sum; // L'élève n'a pas de forfait pour cette année
+            // On récupère TOUS les forfaits actifs pour l'année en cours
+            const activeSubs = p.subscriptions?.filter((s: any) => s.end_date >= '2025-09-01') || [];
+            if (activeSubs.length === 0) return sum;
 
             const isMinor = p.is_minor;
-            let price = 0;
 
-            switch (activeSub.type) {
-              case 'annuel': price = isMinor ? Number(prices.tarif_annuel_enfant) : Number(prices.tarif_annuel_adulte); break;
-              case '1_seance': price = isMinor ? Number(prices.tarif_seance_unique_enfant) : Number(prices.tarif_seance_unique_adulte); break;
-              case '3_seances': price = isMinor ? Number(prices.tarif_3_seances_enfant) : Number(prices.tarif_3_seances_adulte); break;
-              case '5_seances': price = isMinor ? Number(prices.tarif_5_seances_enfant) : Number(prices.tarif_5_seances_adulte); break;
-              case '10_seances': price = isMinor ? Number(prices.tarif_10_seances_enfant) : Number(prices.tarif_10_seances_adulte); break;
-              // ÉTÉ
-              case '1_seance_ete': price = Number(prices.tarif_seance_unique_adulte); break;
-              case '3_seances_ete': price = Number(prices.tarif_3_seances_adulte); break;
-              case '5_seances_ete': price = Number(prices.tarif_5_seances_adulte); break;
-              case '10_seances_ete': price = Number(prices.tarif_10_seances_adulte); break;
-              default: price = 0;
-            }
-            // --- DEBUG : On vérifie si le prix est NaN ---
-            if (isNaN(price)) {
-              console.log("⚠️ ERREUR NaN pour :", p.first_name, p.last_name, "| Forfait:", p.subscription_type, "| Mineur:", isMinor);
-            }
+            // On additionne le prix de CHAQUE forfait actif
+            const studentTotal = activeSubs.reduce((subSum, sub) => {
+              let price = 0;
+              switch (sub.type) {
+                case 'annuel': price = isMinor ? Number(prices.tarif_annuel_enfant) : Number(prices.tarif_annuel_adulte); break;
+                case '1_seance': price = isMinor ? Number(prices.tarif_seance_unique_enfant) : Number(prices.tarif_seance_unique_adulte); break;
+                case '3_seances': price = isMinor ? Number(prices.tarif_3_seances_enfant) : Number(prices.tarif_3_seances_adulte); break;
+                case '5_seances': price = isMinor ? Number(prices.tarif_5_seances_enfant) : Number(prices.tarif_5_seances_adulte); break;
+                case '10_seances': price = isMinor ? Number(prices.tarif_10_seances_enfant) : Number(prices.tarif_10_seances_adulte); break;
+                case '1_seance_ete': price = Number(prices.tarif_seance_unique_adulte); break;
+                case '3_seances_ete': price = Number(prices.tarif_3_seances_adulte); break;
+                case '5_seances_ete': price = Number(prices.tarif_5_seances_adulte); break;
+                case '10_seances_ete': price = Number(prices.tarif_10_seances_adulte); break;
+                default: price = 0;
+              }
+              return subSum + (price || 0);
+            }, 0);
 
-            return sum + (price || 0); // Sécurité : si price est undefined, on ajoute 0
+            return sum + studentTotal;
           }, 0);
 
-
-          // On sécurise aussi les autres totaux au cas où des données manqueraient
           const totalCuis = yearCreations.reduce((sum: number, c: any) => sum + (c.cost || 0), 0);
           const totalPay = yearPaiements.reduce((sum: number, p: any) => sum + (p.montant || 0), 0);
           const solde = totalInscriptions + totalCuis - totalPay;
           const totalKg = yearCreations.reduce((sum: number, c: any) => sum + (c.weight_kg || 0), 0);
-
           return (<><div className="bg-white p-4 rounded-xl shadow-sm border text-center"><p className="text-xs text-gray-500 uppercase font-bold">Inscriptions</p><p className="text-2xl font-bold text-green-700 mt-1">{totalInscriptions.toFixed(2)}€</p></div><div className="bg-white p-4 rounded-xl shadow-sm border text-center"><p className="text-xs text-gray-500 uppercase font-bold">Cuissons</p><p className="text-2xl font-bold text-blue-700 mt-1">{totalCuis.toFixed(2)}€</p><p className="text-xs text-gray-400 mt-1">{totalKg.toFixed(1)} kg</p></div><div className="bg-white p-4 rounded-xl shadow-sm border text-center"><p className="text-xs text-gray-500 uppercase font-bold">Encaissé</p><p className="text-2xl font-bold text-green-500 mt-1">{totalPay.toFixed(2)}€</p></div><div className={`p-4 rounded-xl shadow-sm border text-center ${solde > 0 ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}><p className="text-xs text-gray-500 uppercase font-bold">Solde dû total</p><p className={`text-2xl font-bold mt-1 ${solde > 0 ? 'text-red-600' : 'text-green-600'}`}>{solde.toFixed(2)}€</p></div></>)
         })()}
-
         </div>
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100"><h3 className="font-bold text-lg text-green-800 mb-4">Solde des élèves ({profiles.length})</h3><div className="overflow-x-auto"><table className="w-full text-sm text-left"><thead className="text-xs text-gray-500 uppercase border-b"><tr><th className="py-3 px-2">Nom</th><th className="py-3 px-2">Forfait</th><th className="py-3 px-2">Séances rest.</th></tr></thead><tbody>{profiles.map(p => (<tr key={p.id} className="border-b hover:bg-gray-50"><td className="py-3 px-2 font-medium text-gray-900">{p.last_name} {p.first_name}</td><td className="py-3 px-2 text-gray-600">{p.subscription_type.replace('_', ' ')}</td><td className="py-3 px-2 text-gray-600">{p.subscription_type === 'annuel' ? 'Illimité' : p.sessions_left}</td></tr>))}</tbody></table></div></div>
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100"><h3 className="font-bold text-lg text-green-800 mb-4">Créations de l'année ({yearCreations.length} pièces)</h3>{yearCreations.length === 0 ? <p className="text-sm text-gray-400">Aucune création.</p> : (<div className="max-h-96 overflow-y-auto space-y-2">{yearCreations.map((c: any) => (<div key={c.id} className="flex justify-between items-center text-sm bg-gray-50 p-2 rounded border"><div><span className="font-medium text-gray-800">{c.piece_name || 'Sans nom'}</span><span className="text-gray-400 ml-2">par {c.profiles?.first_name} {c.profiles?.last_name}</span></div><div className="text-right"><span className="text-gray-600 mr-4">{Math.round(c.weight_kg * 1000)}g / {c.firing_passes} cuis.</span><span className="font-bold text-blue-700">{c.cost.toFixed(2)}€</span></div></div>))}</div>)}</div>
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100"><h3 className="font-bold text-lg text-green-800 mb-4">Solde des élèves ({profiles.length})</h3><div className="overflow-x-auto"><table className="w-full text-sm text-left"><thead className="text-xs text-gray-500 uppercase border-b"><tr><th className="py-3 px-2">Nom</th><th className="py-3 px-2">Forfait</th><th className="py-3 px-2">Séances rest.</th></tr></thead><tbody>{profiles.map(p => {
+          const today = new Date().toISOString().split('T')[0];
+          const activeSubs = p.subscriptions?.filter((s: any) => s.end_date >= today) || [];
+          const totalSessions = activeSubs.reduce((sum: number, s: any) => sum + (s.type === 'annuel' ? 0 : (s.sessions_left || 0)), 0);
+          let mainType = 'Aucun';
+        if (activeSubs.some((s: any) => s.type === 'annuel')) { mainType = 'Annuel'; } else if (activeSubs.length > 0) { mainType = activeSubs[0].type.replaceAll('_', ' ').replaceAll('ete', 'Été'); }
+        return (<tr key={p.id} className="border-b hover:bg-gray-50"><td className="py-3 px-2 font-medium text-gray-900">{p.last_name} {p.first_name}</td><td className="py-3 px-2 text-gray-600 capitalize">{mainType}</td><td className="py-3 px-2 text-gray-600">{mainType === 'Annuel' ? 'Illimité' : totalSessions}</td></tr>)
+        })}</tbody></table></div></div>
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100"><h3 className="font-bold text-lg text-green-800 mb-4">Créations de l'année ({yearCreations.length} pièces)</h3>{yearCreations.length === 0 ? <p className="text-sm text-gray-400">Aucune création.</p> : (<div className="max-h-96 overflow-y-auto space-y-2">{yearCreations.map((c: any) => (<div key={c.id} className="flex justify-between items-center text-sm bg-gray-50 p-2 rounded border"><div><span className="font-medium text-gray-800">{c.piece_name || 'Sans nom'}</span><span className="text-gray-400 ml-2">par {c.profiles?.first_name} {c.profiles?.last_name}</span></div><div className="text-right"><span className="text-gray-600 mr-4">{Math.round(c.weight_kg * 1000)}g / {c.firing_passes} cuis.</span><span className="font-bold text-blue-700">{(c.cost || 0).toFixed(2)}€</span></div></div>))}</div>)}</div>
         </div>
       )}
 

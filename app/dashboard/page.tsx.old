@@ -330,21 +330,6 @@ export default function DashboardPage() {
         message: requestMsg
       })
       if (!error) {
-        // 2. Envoi du mail à Cécile
-        try {
-          await fetch('/api/send-student-request', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              studentName: `${profile.first_name} ${profile.last_name}`,
-              requestType: requestType,
-              message: requestMsg
-            })
-          });
-        } catch (err) {
-          console.error("Erreur d'envoi d'email", err);
-        }
-
         alert('Demande envoyée ! Cécile va vous contacter.')
         setShowRequestForm(false)
         setRequestMsg('')
