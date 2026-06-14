@@ -202,23 +202,31 @@ export default function DashboardPage() {
   useEffect(() => {
     let mounted = true;
 
-    const initAuth = async () => {
-      if (typeof window !== 'undefined' && window.location.hash.includes('type=recovery')) {
-        if (mounted) { setIsRecoveryMode(true); setShowPasswordForm(true); setLoading(false); }
-        return;
+    // 1. On configure l'écouteur d'événements EN PREMIER.
+    // C'est lui qui va attraper le ?code=... du lien sur lequel on a cliqué.
+    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY' && mounted) {
+        setIsRecoveryMode(true);
+        setShowPasswordForm(true);
+        setLoading(false);
       }
+    });
+
+    // 2. Ensuite on initialise l'application normalement
+    const initAuth = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (user && mounted) { await fetchUserData(user.id); }
       else if (mounted) { setLoading(false); }
     };
+
     initAuth();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY' && mounted) { setIsRecoveryMode(true); setShowPasswordForm(true); setLoading(false); }
-    });
-
-    return () => { mounted = false; authListener.subscription.unsubscribe(); }
-  }, [])
+    // 3. Nettoyage en quittant
+    return () => {
+      mounted = false;
+      authListener.subscription.unsubscribe();
+    }
+  }, []) // Le tableau de dépendances reste vide
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault(); setErrorLogin('')
