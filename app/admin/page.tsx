@@ -45,8 +45,12 @@ export default function AdminPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [errorLogin, setErrorLogin] = useState('')
+  const [groupTarget, setGroupTarget] = useState('all')
+  const [groupSubject, setGroupSubject] = useState('')
+  const [groupMessage, setGroupMessage] = useState('')
+  const [sendingGroupEmail, setSendingGroupEmail] = useState(false)
 
-  const [activeTab, setActiveTab] = useState<'eleves' | 'planning' | 'bilan'>('eleves')
+  const [activeTab, setActiveTab] = useState<'eleves' | 'planning' | 'bilan'| 'com'>('eleves')
   const [planningSessions, setPlanningSessions] = useState<any[]>([])
   const [creneauxList, setCreneauxList] = useState<any[]>([])
   const [generating, setGenerating] = useState(false)
@@ -364,6 +368,7 @@ export default function AdminPage() {
       <button onClick={() => setActiveTab('eleves')} className={`px-4 py-2 font-bold rounded-t-lg transition ${activeTab === 'eleves' ? 'bg-white text-green-800 border border-b-white -mb-[1px]' : 'text-green-600 hover:text-green-800'}`}>Gestion Élève</button>
       <button onClick={() => setActiveTab('planning')} className={`px-4 py-2 font-bold rounded-t-lg transition ${activeTab === 'planning' ? 'bg-white text-green-800 border border-b-white -mb-[1px]' : 'text-green-600 hover:text-green-800'}`}>Planning & Sessions</button>
       <button onClick={() => { setActiveTab('bilan'); fetchYearSummary(); }} className={`px-4 py-2 font-bold rounded-t-lg transition ${activeTab === 'bilan' ? 'bg-white text-green-800 border border-b-white -mb-[1px]' : 'text-green-600 hover:text-green-800'}`}>📊 Bilan Annuel</button>
+      <button onClick={() => setActiveTab('com')} className={`px-4 py-2 font-bold rounded-t-lg transition ${activeTab === 'com' ? 'bg-white text-green-800 border border-b-white -mb-[1px]' : 'text-green-600 hover:text-green-800'}`}>📧 Communication</button>
       </div>
 
       {/* ONGLET ELEVE */}
@@ -494,15 +499,135 @@ export default function AdminPage() {
           return (<><div className="bg-white p-4 rounded-xl shadow-sm border text-center"><p className="text-xs text-gray-500 uppercase font-bold">Inscriptions</p><p className="text-2xl font-bold text-green-700 mt-1">{totalInscriptions.toFixed(2)}€</p></div><div className="bg-white p-4 rounded-xl shadow-sm border text-center"><p className="text-xs text-gray-500 uppercase font-bold">Cuissons</p><p className="text-2xl font-bold text-blue-700 mt-1">{totalCuis.toFixed(2)}€</p><p className="text-xs text-gray-400 mt-1">{totalKg.toFixed(1)} kg</p></div><div className="bg-white p-4 rounded-xl shadow-sm border text-center"><p className="text-xs text-gray-500 uppercase font-bold">Encaissé</p><p className="text-2xl font-bold text-green-500 mt-1">{totalPay.toFixed(2)}€</p></div><div className={`p-4 rounded-xl shadow-sm border text-center ${solde > 0 ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}><p className="text-xs text-gray-500 uppercase font-bold">Solde dû total</p><p className={`text-2xl font-bold mt-1 ${solde > 0 ? 'text-red-600' : 'text-green-600'}`}>{solde.toFixed(2)}€</p></div></>)
         })()}
         </div>
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100"><h3 className="font-bold text-lg text-green-800 mb-4">Solde des élèves ({profiles.length})</h3><div className="overflow-x-auto"><table className="w-full text-sm text-left"><thead className="text-xs text-gray-500 uppercase border-b"><tr><th className="py-3 px-2">Nom</th><th className="py-3 px-2">Forfait</th><th className="py-3 px-2">Séances rest.</th></tr></thead><tbody>{profiles.map(p => {
-          const today = new Date().toISOString().split('T')[0];
-          const activeSubs = p.subscriptions?.filter((s: any) => s.end_date >= today) || [];
-          const totalSessions = activeSubs.reduce((sum: number, s: any) => sum + (s.type === 'annuel' ? 0 : (s.sessions_left || 0)), 0);
-          let mainType = 'Aucun';
-        if (activeSubs.some((s: any) => s.type === 'annuel')) { mainType = 'Annuel'; } else if (activeSubs.length > 0) { mainType = activeSubs[0].type.replaceAll('_', ' ').replaceAll('ete', 'Été'); }
-        return (<tr key={p.id} className="border-b hover:bg-gray-50"><td className="py-3 px-2 font-medium text-gray-900">{p.last_name} {p.first_name}</td><td className="py-3 px-2 text-gray-600 capitalize">{mainType}</td><td className="py-3 px-2 text-gray-600">{mainType === 'Annuel' ? 'Illimité' : totalSessions}</td></tr>)
-        })}</tbody></table></div></div>
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100"><h3 className="font-bold text-lg text-green-800 mb-4">Solde des élèves ({profiles.length})</h3><div className="overflow-x-auto">        <div className="overflow-x-auto">
+        <table className="w-full text-sm text-left">
+        <thead className="text-xs text-gray-500 uppercase border-b">
+        <tr>
+        <th className="py-3 px-2">Nom</th>
+        <th className="py-3 px-2">Forfait</th>
+        <th className="py-3 px-2">Séances rest.</th>
+        <th className="py-3 px-2">Solde dû</th>
+        </tr>
+        </thead>
+        <tbody>
+        {(() => {
+          // On regroupe les créations et paiements par élève pour optimiser le calcul
+          const creationsByProfile = yearCreations.reduce((acc, c) => {
+            acc[c.profile_id] = (acc[c.profile_id] || 0) + (c.cost || 0);
+            return acc;
+          }, {} as Record<string, number>);
+
+          const paiementsByProfile = yearPaiements.reduce((acc, p) => {
+            acc[p.profile_id] = (acc[p.profile_id] || 0) + (p.montant || 0);
+            return acc;
+          }, {} as Record<string, number>);
+
+          return profiles.map(p => {
+            const today = new Date().toISOString().split('T')[0];
+            const activeSubs = p.subscriptions?.filter((s: any) => s.end_date >= today) || [];
+            const totalSessions = activeSubs.reduce((sum: number, s: any) => sum + (s.type === 'annuel' ? 0 : (s.sessions_left || 0)), 0);
+            let mainType = 'Aucun';
+          if (activeSubs.some((s: any) => s.type === 'annuel')) { mainType = 'Annuel'; } else if (activeSubs.length > 0) { mainType = activeSubs[0].type.replaceAll('_', ' ').replaceAll('ete', 'Été'); }
+
+          // Calcul du prix des forfaits de l'élève
+          const studentSubPrice = activeSubs.reduce((subSum: number, sub: any) => {
+            if (!prices) return subSum;
+            let price = 0;
+            const isMinor = p.is_minor;
+            switch (sub.type) {
+              case 'annuel': price = isMinor ? Number(prices.tarif_annuel_enfant) : Number(prices.tarif_annuel_adulte); break;
+              case '1_seance': price = isMinor ? Number(prices.tarif_seance_unique_enfant) : Number(prices.tarif_seance_unique_adulte); break;
+              case '3_seances': price = isMinor ? Number(prices.tarif_3_seances_enfant) : Number(prices.tarif_3_seances_adulte); break;
+              case '5_seances': price = isMinor ? Number(prices.tarif_5_seances_enfant) : Number(prices.tarif_5_seances_adulte); break;
+              case '10_seances': price = isMinor ? Number(prices.tarif_10_seances_enfant) : Number(prices.tarif_10_seances_adulte); break;
+              case '1_seance_ete': price = Number(prices.tarif_seance_unique_adulte); break;
+              case '3_seances_ete': price = Number(prices.tarif_3_seances_adulte); break;
+              case '5_seances_ete': price = Number(prices.tarif_5_seances_adulte); break;
+              case '10_seances_ete': price = Number(prices.tarif_10_seances_adulte); break;
+              default: price = 0;
+            }
+            return subSum + (price || 0);
+          }, 0);
+
+          // Calcul du vrai solde dû pour l'année : Forfaits + Créations - Paiements
+          const studentCout = creationsByProfile[p.id] || 0;
+          const studentPaye = paiementsByProfile[p.id] || 0;
+          const studentSolde = studentSubPrice + studentCout - studentPaye;
+
+          return (
+            <tr key={p.id} className="border-b hover:bg-gray-50">
+            <td className="py-3 px-2 font-medium text-gray-900">{p.last_name} {p.first_name}</td>
+            <td className="py-3 px-2 text-gray-600 capitalize">{mainType}</td>
+            <td className="py-3 px-2 text-gray-600">{mainType === 'Annuel' ? 'Illimité' : totalSessions}</td>
+            <td className={`py-3 px-2 font-bold ${studentSolde > 0 ? 'text-red-600' : 'text-green-600'}`}>
+            {studentSolde > 0 ? `${studentSolde.toFixed(2)}€` : 'Soldé ✓'}
+            </td>
+            </tr>
+          )
+          })
+        })()}
+        </tbody>
+        </table>
+        </div></div></div>
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100"><h3 className="font-bold text-lg text-green-800 mb-4">Créations de l'année ({yearCreations.length} pièces)</h3>{yearCreations.length === 0 ? <p className="text-sm text-gray-400">Aucune création.</p> : (<div className="max-h-96 overflow-y-auto space-y-2">{yearCreations.map((c: any) => (<div key={c.id} className="flex justify-between items-center text-sm bg-gray-50 p-2 rounded border"><div><span className="font-medium text-gray-800">{c.piece_name || 'Sans nom'}</span><span className="text-gray-400 ml-2">par {c.profiles?.first_name} {c.profiles?.last_name}</span></div><div className="text-right"><span className="text-gray-600 mr-4">{Math.round(c.weight_kg * 1000)}g / {c.firing_passes} cuis.</span><span className="font-bold text-blue-700">{(c.cost || 0).toFixed(2)}€</span></div></div>))}</div>)}</div>
+        </div>
+      )}
+      {/* ONGLET COMMUNICATION */}
+      {activeTab === 'com' && (
+        <div className="space-y-6">
+        <div className="bg-white p-6 rounded-2xl shadow-md border border-green-100">
+        <h2 className="text-xl font-bold text-green-800 mb-4">Envoyer un e-mail groupé</h2>
+
+        <div className="space-y-4">
+        <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Destinataires</label>
+        <select value={groupTarget} onChange={(e) => setGroupTarget(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg bg-white text-gray-900">
+        <option value="all">Tous les élèves</option>
+        <option value="annuel">Forfait Annuel</option>
+        <option value="ete">Forfaits Été</option>
+        <option value="carte">Forfaits à la carte (3, 5, 10 séances)</option>
+        </select>
+        </div>
+
+        <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Sujet</label>
+        <input type="text" value={groupSubject} onChange={(e) => setGroupSubject(e.target.value)} placeholder="Ex: Invitation vernissage, Informations rentrée..." className="w-full p-2 border border-gray-300 rounded-lg bg-white text-gray-900" />
+        </div>
+
+        <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Message</label>
+        <textarea value={groupMessage} onChange={(e) => setGroupMessage(e.target.value)} rows={6} placeholder="Écrivez votre message ici..." className="w-full p-2 border border-gray-300 rounded-lg bg-white text-gray-900" />
+        </div>
+
+        <button
+        onClick={async () => {
+          if (!groupSubject || !groupMessage) { alert('Remplissez le sujet et le message'); return; }
+          if (!confirm(`Envoyer cet e-mail aux élèves sélectionnés ?`)) return;
+
+          setSendingGroupEmail(true);
+          const res = await fetch('/api/send-group-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target: groupTarget, subject: groupSubject, message: groupMessage })
+          });
+          const data = await res.json();
+
+          if (data.success || data.message) {
+            alert(data.message || 'E-mails envoyés !');
+            setGroupSubject('');
+            setGroupMessage('');
+          } else {
+            alert('Erreur: ' + data.error);
+          }
+          setSendingGroupEmail(false);
+        }}
+        disabled={sendingGroupEmail}
+        className="bg-green-700 text-white px-4 py-2 rounded-lg hover:bg-green-800 transition font-bold disabled:opacity-50"
+        >
+        {sendingGroupEmail ? 'Envoi en cours...' : '📧 Envoyer'}
+        </button>
+        </div>
+        </div>
         </div>
       )}
 
