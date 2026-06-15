@@ -5,8 +5,6 @@ import { useEffect, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 
-const supabase = createClient()
-
 type Profile = {
   id: string
   first_name: string
@@ -77,6 +75,8 @@ type Creneau = {
 }
 
 export default function DashboardPage() {
+  const supabase = createClient()
+
   const [profile, setProfile] = useState<Profile | null>(null)
   const [prices, setPrices] = useState<Prices | null>(null)
   const [creations, setCreations] = useState<Creation[]>([])
@@ -313,7 +313,11 @@ export default function DashboardPage() {
   const handleBookSession = async (sessionId: string) => {
     setBookingSessionId(sessionId)
     const { error } = await supabase.rpc('book_card_session', { p_session_id: sessionId })
-    if (error) { alert(error.message) } else { if (profile) await fetchUserData(profile.id) }
+    if (error) {
+      alert(error.message)
+    } else {
+      if (profile) await fetchUserData(profile.id)
+    }
     setBookingSessionId(null)
   }
 
