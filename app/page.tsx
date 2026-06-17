@@ -126,7 +126,7 @@ export default function Home() {
     <h2 className="text-3xl font-bold text-green-800 text-center mb-8">Formules et Tarifs</h2>
     <div className="grid md:grid-cols-2 gap-6">
     <div className="bg-yellow-50 p-6 rounded-xl border border-yellow-200">
-    <h3 className="font-bold text-xl text-yellow-800 mb-4 text-center">Enfants / Ados</h3>
+    <h3 className="font-bold text-xl text-yellow-800 mb-4 text-center">Enfants</h3>
     <div className="space-y-2">
     <div className="flex justify-between py-2 border-b border-yellow-200"><span>1 séance</span><span className="font-bold">30 €</span></div>
     <div className="flex justify-between py-2 border-b border-yellow-200"><span>3 séances</span><span className="font-bold">80 €</span></div>
@@ -136,7 +136,7 @@ export default function Home() {
     </div>
     </div>
     <div className="bg-green-50 p-6 rounded-xl border border-green-200">
-    <h3 className="font-bold text-xl text-green-800 mb-4 text-center">Adultes</h3>
+    <h3 className="font-bold text-xl text-green-800 mb-4 text-center">Ados / Adultes</h3>
     <div className="space-y-2">
     <div className="flex justify-between py-2 border-b border-green-200"><span>1 séance</span><span className="font-bold">40 €</span></div>
     <div className="flex justify-between py-2 border-b border-green-200"><span>3 séances</span><span className="font-bold">110 €</span></div>
