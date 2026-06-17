@@ -53,7 +53,7 @@ export async function POST(request: Request) {
         'api-key': process.env.BREVO_API_KEY!,
       },
       body: JSON.stringify({
-        sender: { name: "Atelier Rêve de Porcelaine", email: "cecile.grasset2@gmail.com" },
+        sender: { name: "Atelier Rêve de Porcelaine", email: "contact@reve-de-porcelaine" },
         to: students.map((s: any) => ({ email: s.email, name: s.first_name })),
                            subject: subject,
                            htmlContent: htmlContent,
