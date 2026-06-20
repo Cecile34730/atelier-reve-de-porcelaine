@@ -54,7 +54,7 @@ export async function POST(request: Request) {
         'api-key': process.env.BREVO_API_KEY!,
       },
       body: JSON.stringify({
-        sender: { name: "Atelier Rêve de Porcelaine", email: "contact@reve-de-porcelaine" }, // L'adresse validée Brevo
+        sender: { name: "Atelier Rêve de Porcelaine", email: "contact@reve-de-porcelaine.fr" }, // L'adresse validée Brevo
         to: recipients,
         subject: subject,
         htmlContent: `<div style="font-family: sans-serif; color: #333;"><p>Bonjour,</p><p>${message.replace(/\n/g, '<br>')}</p><p>Atelier Rêve de Porcelaine 🎨</p></div>`,
