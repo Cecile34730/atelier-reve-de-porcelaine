@@ -770,9 +770,14 @@ export default function DashboardPage() {
             </div>
             <div>
             {profile.subscription_type === 'annuel' ? (
-              booking?.status === 'absent_annuel'
-            ? <span className="text-xs bg-gray-200 text-gray-600 px-3 py-1 rounded font-semibold">Absent ✅</span>
-            : <button onClick={() => handleDeclareAbsence(session.id)} className="bg-orange-500 text-white px-3 py-1 rounded text-xs font-bold hover:bg-orange-600">Je serai absent</button>
+              booking?.status === 'absent_annuel' ? (
+                <span className="text-xs bg-gray-200 text-gray-600 px-3 py-1 rounded font-semibold">Absent ✅</span>
+              ) : (
+                <div className="flex flex-col items-end gap-1">
+                <span className="text-xs bg-green-100 text-green-700 px-3 py-1 rounded font-bold">Inscrit ✅</span>
+                <button onClick={() => handleDeclareAbsence(session.id)} className="bg-orange-500 text-white px-2 py-1 rounded text-xs font-bold hover:bg-orange-600">Je serai absent</button>
+                </div>
+              )
             ) : profile.subscription_type !== 'aucun' ? (
               booking?.status === 'booked_card'
             ? <span className="text-xs bg-green-100 text-green-700 px-3 py-1 rounded font-bold">Inscrit ✅</span>

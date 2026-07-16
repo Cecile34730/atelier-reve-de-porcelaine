@@ -450,7 +450,50 @@ export default function AdminPage() {
         {planningSessions.map(session => (
           <div key={session.id} className={`p-4 rounded-lg border ${session.annulee ? 'bg-red-50 border-red-200 opacity-60' : 'bg-gray-50 border-gray-200'}`}>
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-2 gap-2"><div><span className="font-bold text-green-800">{new Date(session.session_date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</span><span className="ml-2 text-gray-600">({session.creneaux.jour} {session.creneaux.heure_debut?.substring(0,5)} - {session.creneaux.heure_fin?.substring(0,5)})</span>{session.creneaux.public_cible && <span className="ml-2 bg-green-100 text-green-700 px-2 py-0.5 rounded text-xs">{session.creneaux.public_cible}</span>}</div><div className="flex items-center gap-2"><span className={`text-sm px-2 py-1 rounded ${session.annulee ? 'bg-red-200 text-red-800' : 'bg-green-200 text-green-800'}`}>{session.annulee ? 'Annulée' : 'Active'}</span>{!session.annulee && (<button onClick={async () => { if(confirm("Envoyer un email d'absence à tous les élèves inscrits ?")) { const res = await fetch('/api/notify-absence', { method: 'POST', body: JSON.stringify({ sessionId: session.id }) }); const data = await res.json(); if(data.success) alert(data.message); else alert("Erreur: " + data.error) } }} className="bg-red-500 text-white px-3 py-1 rounded text-xs font-bold hover:bg-red-600 transition">📧 Prévenir d'absence</button>)}</div></div>
-          <div className="text-sm text-gray-600"><p className="font-medium mb-1">Inscrits ({session.bookings.length}/{session.creneaux.capacite_max}) :</p><div className="flex flex-wrap gap-2">{session.bookings.map((b: any) => (<span key={b.profile_id} className="bg-white px-2 py-1 rounded border shadow-sm text-xs">{b.profiles.first_name} {b.profiles.last_name}</span>))}{session.bookings.length === 0 && <span className="text-xs text-gray-400 italic">Aucun inscrit</span>}</div></div>
+          {(() => {
+            const sessionDate = session.session_date; // On vérifie la validité du forfait À LA DATE DE LA SÉANCE
+
+            // 1. Élèves annuels inscrits à ce créneau
+            const annualAttendees = profiles.filter(p => {
+              if (p.creneau_id !== session.creneau_id) return false;
+              return p.subscriptions?.some((s: any) => s.type === 'annuel' && s.start_date <= sessionDate && s.end_date >= sessionDate);
+            }).map(p => ({
+              id: p.id,
+              first_name: p.first_name,
+              last_name: p.last_name,
+              isAbsent: session.bookings.some((b: any) => b.profile_id === p.id && b.status === 'absent_annuel')
+            }));
+
+            // 2. Élèves à la carte (bookings avec booked_card)
+            const cardAttendees = session.bookings
+            .filter((b: any) => b.status === 'booked_card')
+            .map((b: any) => ({
+              id: b.profile_id,
+              first_name: b.profiles.first_name,
+              last_name: b.profiles.last_name,
+              isAbsent: false
+            }));
+
+            // 3. On fusionne les deux listes
+            const allAttendees = [...annualAttendees, ...cardAttendees];
+            const presentCount = allAttendees.filter(a => !a.isAbsent).length;
+
+            return (
+              <div className="text-sm text-gray-600">
+              <p className="font-medium mb-1">Inscrits ({presentCount}/{session.creneaux.capacite_max}) :</p>
+              <div className="flex flex-wrap gap-2">
+              {allAttendees.map(a => (
+                <span key={a.id} className={`px-2 py-1 rounded border shadow-sm text-xs ${a.isAbsent ? 'bg-gray-200 text-gray-400 line-through' : 'bg-white text-gray-800'}`}>
+                {a.first_name} {a.last_name}
+                {annualAttendees.some(an => an.id === a.id) && !a.isAbsent && ' (Annuel)'}
+                {a.isAbsent && ' (Absent)'}
+                </span>
+              ))}
+              {allAttendees.length === 0 && <span className="text-xs text-gray-400 italic">Aucun inscrit</span>}
+              </div>
+              </div>
+            );
+          })()}
           </div>
         ))}
         {planningSessions.length === 0 && (<div className="text-center py-8 text-gray-400"><p>Aucune session future trouvée.</p></div>)}
