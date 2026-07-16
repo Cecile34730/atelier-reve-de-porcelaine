@@ -248,10 +248,17 @@ export default function DashboardPage() {
     (chosenType.includes('5') ? 5 :
     (chosenType.includes('3') ? 3 : 1)))
 
-    // 1. Calcul des dates (même logique que l'admin)
+    // 1. Calcul des dates (CORRECTION DU BUG D'ANNÉE)
     const now = new Date();
     let startYear = now.getFullYear();
-    if (now.getMonth() + 1 < 9) startYear -= 1;
+    const month = now.getMonth() + 1; // 1 = Janvier, 7 = Juillet, etc.
+
+    // Si on est entre Janvier et Juin, l'année scolaire a commencé l'année dernière
+    if (month <= 6) {
+      startYear -= 1;
+    }
+    // Si on est en Juillet (7), Août (8), ou après, startYear reste l'année en cours (ex: 2026),
+    // ce qui donnera bien septembre 2026 -> juin 2027.
 
     let startDate = '', endDate = '';
     if (chosenType === 'annuel') { startDate = `${startYear}-09-01`; endDate = `${startYear + 1}-06-30`; }
@@ -277,7 +284,7 @@ export default function DashboardPage() {
       }).eq('id', existingSub.id);
       error = res.error;
     } else {
-      // Sinon, on crée un NOUVEAU forfait (ex: il a l'annuel et prend l'été)
+      // Sinon, on crée un NOUVEAU forfait
       const res = await supabase.from('subscriptions').insert({
         profile_id: profile.id,
         type: chosenType,
@@ -289,6 +296,11 @@ export default function DashboardPage() {
     }
 
     if (!error) {
+      // NOUVEAU : On enregistre le créneau choisi dans le profil de l'élève si forfait annuel
+      if (chosenType === 'annuel' && selectedCreneauId) {
+        await supabase.from('profiles').update({ creneau_id: selectedCreneauId }).eq('id', profile.id);
+      }
+
       try {
         // On recharge les données en toute sécurité
         await fetchUserData(profile.id);
