@@ -121,14 +121,28 @@ export default function AdminPage() {
     const { data: pData } = await supabase.from('paiements').select('*').eq('profile_id', student.id).order('date_paiement', { ascending: false });
     if (pData) setPaiements(pData);
 
+    const today = new Date().toISOString().split('T')[0];
+
+    // 1. On récupère le profil frais
     const { data: freshProfile } = await supabase.from('profiles').select('*').eq('id', student.id).single();
+
+    // 2. On récupère les forfaits actifs de l'élève
+    const { data: subsData } = await supabase
+    .from('subscriptions')
+    .select('*')
+    .eq('profile_id', student.id)
+    .gte('end_date', today)
+    .order('start_date', { ascending: true });
+
+    setStudentSubscriptions(subsData || []);
+
+    // 3. On met à jour l'interface avec le profil ET les forfaits frais
     if (freshProfile) {
-      setSelectedStudent({ ...freshProfile, subscriptions: student.subscriptions || [] } as Profile);
+      setSelectedStudent({ ...freshProfile, subscriptions: subsData || [] } as Profile);
       setEditCustomPrice(freshProfile.custom_subscription_price?.toString() || '');
     }
 
-    const today = new Date().toISOString().split('T')[0];
-
+    // 4. On cherche le forfait principal pour pré-remplir le menu déroulant
     let { data: activeSub } = await supabase
     .from('subscriptions')
     .select('*')
@@ -156,15 +170,7 @@ export default function AdminPage() {
       setEditSubscription('aucun');
       setEditSessionsLeft(0);
     }
-
-    const { data: subsData } = await supabase
-    .from('subscriptions')
-    .select('*')
-    .eq('profile_id', student.id)
-    .gte('end_date', today)
-    .order('start_date', { ascending: true });
-
-    setStudentSubscriptions(subsData || []);
+  };
   }
 
   const handleLogin = async (e: React.FormEvent) => { e.preventDefault(); setErrorLogin(''); const { error } = await supabase.auth.signInWithPassword({ email, password }); if (error) { setErrorLogin(error.message) } else { setLoading(true); window.location.reload() } }
@@ -179,7 +185,12 @@ export default function AdminPage() {
 
       const now = new Date();
       let startYear = now.getFullYear();
-      if (now.getMonth() + 1 < 9) startYear -= 1;
+      const month = now.getMonth() + 1; // 1 = Janvier, 7 = Juillet, etc.
+
+      // Si on est entre Janvier et Juin, l'année scolaire a commencé l'année dernière
+      if (month <= 6) {
+        startYear -= 1;
+      }
 
       let startDate = '', endDate = '';
       if (chosenType === 'annuel') { startDate = `${startYear}-09-01`; endDate = `${startYear + 1}-06-30`; }
