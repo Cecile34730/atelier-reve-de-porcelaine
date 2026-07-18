@@ -23,7 +23,7 @@ type Profile = {
 
 type Creation = { id: string; piece_name: string | null; weight_kg: number; firing_passes: number; cost: number; created_at: string }
 type Paiement = { id: string; montant: number; date_paiement: string; mode: string; note: string | null }
-type Prices = { tarif_annuel_adulte: number; tarif_annuel_enfant: number; tarif_3_seances_adulte: number; tarif_3_seances_enfant: number; tarif_5_seances_adulte: number; tarif_5_seances_enfant: number; tarif_10_seances_adulte: number; tarif_10_seances_enfant: number; tarif_seance_unique_adulte: number; tarif_seance_unique_enfant: number; tarif_session_ete: number }
+type Prices = { tarif_annuel_adulte: number; tarif_annuel_enfant: number; tarif_3_seances_adulte: number; tarif_3_seances_enfant: number; tarif_5_seances_adulte: number; tarif_5_seances_enfant: number; tarif_10_seances_adulte: number; tarif_10_seances_enfant: number; tarif_1_seance_adulte: number; tarif_1_seance_enfant: number; tarif_session_ete: number }
 
 export default function AdminPage() {
   const [profiles, setProfiles] = useState<Profile[]>([])
@@ -171,7 +171,6 @@ export default function AdminPage() {
       setEditSessionsLeft(0);
     }
   };
-  }
 
   const handleLogin = async (e: React.FormEvent) => { e.preventDefault(); setErrorLogin(''); const { error } = await supabase.auth.signInWithPassword({ email, password }); if (error) { setErrorLogin(error.message) } else { setLoading(true); window.location.reload() } }
   const handleLogout = async () => { await supabase.auth.signOut(); window.location.href = '/dashboard' }
@@ -185,9 +184,8 @@ export default function AdminPage() {
 
       const now = new Date();
       let startYear = now.getFullYear();
-      const month = now.getMonth() + 1; // 1 = Janvier, 7 = Juillet, etc.
+      const month = now.getMonth() + 1;
 
-      // Si on est entre Janvier et Juin, l'année scolaire a commencé l'année dernière
       if (month <= 6) {
         startYear -= 1;
       }
@@ -195,30 +193,61 @@ export default function AdminPage() {
       let startDate = '', endDate = '';
       if (chosenType === 'annuel') { startDate = `${startYear}-09-01`; endDate = `${startYear + 1}-06-30`; }
       else if (chosenType.includes('_ete')) { startDate = `${startYear + 1}-07-01`; endDate = `${startYear + 1}-08-31`; }
-      else { startDate = `${startYear}-09-01`; endDate = `${startYear + 1}-08-31`; }
+      else if (chosenType !== 'aucun') { startDate = `${startYear}-09-01`; endDate = `${startYear + 1}-08-31`; }
 
       const today = now.toISOString().split('T')[0];
+      const yesterday = new Date(new Date().setDate(new Date().getDate() - 1)).toISOString().split('T')[0];
 
-      const { data: existingSub } = await supabase
+      // 1. On sauvegarde le prix personnalisé dans le profil
+      await supabase.from('profiles').update({
+        custom_subscription_price: editCustomPrice ? parseFloat(editCustomPrice) : null
+      }).eq('id', selectedStudent.id);
+
+      // 2. On récupère tous les forfaits ACTIFS de l'élève
+      const { data: activeSubs } = await supabase
       .from('subscriptions')
-      .select('id')
+      .select('id, type')
       .eq('profile_id', selectedStudent.id)
-      .eq('type', chosenType)
-      .gte('end_date', today)
-      .maybeSingle();
+      .gte('end_date', today);
 
-      if (existingSub) {
-        const { error } = await supabase.from('subscriptions').update({
-          sessions_left: chosenSessions, start_date: startDate, end_date: endDate
-        }).eq('id', existingSub.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from('subscriptions').insert({
-          profile_id: selectedStudent.id, type: chosenType, sessions_left: chosenSessions, start_date: startDate, end_date: endDate
-        });
-        if (error) throw error;
+      // 3. Si on choisit un forfait principal, on EXPIRE les autres forfaits principaux
+      const isMainSub = !chosenType.includes('_ete');
+      if (activeSubs && activeSubs.length > 0) {
+        for (const sub of activeSubs) {
+          const subIsMain = !sub.type.includes('_ete');
+          if (chosenType !== 'aucun' && isMainSub && subIsMain && sub.type !== chosenType) {
+            await supabase.from('subscriptions').update({ end_date: yesterday }).eq('id', sub.id);
+          }
+          if (chosenType === 'aucun' && subIsMain) {
+            await supabase.from('subscriptions').update({ end_date: yesterday }).eq('id', sub.id);
+          }
+        }
       }
 
+      // 4. On insère ou met à jour le nouveau forfait choisi
+      if (chosenType !== 'aucun') {
+        const { data: chosenSub } = await supabase
+        .from('subscriptions')
+        .select('id')
+        .eq('profile_id', selectedStudent.id)
+        .eq('type', chosenType)
+        .gte('end_date', today)
+        .maybeSingle();
+
+        if (chosenSub) {
+          const { error } = await supabase.from('subscriptions').update({
+            sessions_left: chosenSessions, start_date: startDate, end_date: endDate
+          }).eq('id', chosenSub.id);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase.from('subscriptions').insert({
+            profile_id: selectedStudent.id, type: chosenType, sessions_left: chosenSessions, start_date: startDate, end_date: endDate
+          });
+          if (error) throw error;
+        }
+      }
+
+      // 5. On recharge TOUTES les données de l'élève pour recalculer le solde
       await selectStudent(selectedStudent);
 
     } catch (error: any) {
@@ -312,16 +341,35 @@ export default function AdminPage() {
 
     activeSubs.forEach((sub: any) => {
       switch (sub.type) {
-        case 'annuel': totalPrice += isMinor ? Number(prices.tarif_annuel_enfant) : Number(prices.tarif_annuel_adulte); break;
-        case '1_seance': totalPrice += isMinor ? Number(prices.tarif_seance_unique_enfant) : Number(prices.tarif_seance_unique_adulte); break;
-        case '3_seances': totalPrice += isMinor ? Number(prices.tarif_3_seances_enfant) : Number(prices.tarif_3_seances_adulte); break;
-        case '5_seances': totalPrice += isMinor ? Number(prices.tarif_5_seances_enfant) : Number(prices.tarif_5_seances_adulte); break;
-        case '10_seances': totalPrice += isMinor ? Number(prices.tarif_10_seances_enfant) : Number(prices.tarif_10_seances_adulte); break;
-        case '1_seance_ete': totalPrice += Number(prices.tarif_seance_unique_adulte); break;
-        case '3_seances_ete': totalPrice += Number(prices.tarif_3_seances_adulte); break;
-        case '5_seances_ete': totalPrice += Number(prices.tarif_5_seances_adulte); break;
-        case '10_seances_ete': totalPrice += Number(prices.tarif_10_seances_adulte); break;
-        default: break;
+        case 'annuel':
+          totalPrice += isMinor ? Number(prices.tarif_annuel_enfant) : Number(prices.tarif_annuel_adulte)
+          break
+        case '1_seance':
+          totalPrice += isMinor ? Number(prices.tarif_1_seance_enfant) : Number(prices.tarif_1_seance_adulte)
+          break
+        case '3_seances':
+          totalPrice += isMinor ? Number(prices.tarif_3_seances_enfant) : Number(prices.tarif_3_seances_adulte)
+          break
+        case '5_seances':
+          totalPrice += isMinor ? Number(prices.tarif_5_seances_enfant) : Number(prices.tarif_5_seances_adulte)
+          break
+        case '10_seances':
+          totalPrice += isMinor ? Number(prices.tarif_10_seances_enfant) : Number(prices.tarif_10_seances_adulte)
+          break
+        case '1_seance_ete':
+          totalPrice += Number(prices.tarif_session_ete)
+          break
+        case '3_seances_ete':
+          totalPrice += Number(prices.tarif_session_ete) * 3
+          break
+        case '5_seances_ete':
+          totalPrice += Number(prices.tarif_session_ete) * 5
+          break
+        case '10_seances_ete':
+          totalPrice += Number(prices.tarif_session_ete) * 10
+          break
+        default:
+          break
       }
     });
 
@@ -461,6 +509,7 @@ export default function AdminPage() {
         {planningSessions.map(session => (
           <div key={session.id} className={`p-4 rounded-lg border ${session.annulee ? 'bg-red-50 border-red-200 opacity-60' : 'bg-gray-50 border-gray-200'}`}>
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-2 gap-2"><div><span className="font-bold text-green-800">{new Date(session.session_date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</span><span className="ml-2 text-gray-600">({session.creneaux.jour} {session.creneaux.heure_debut?.substring(0,5)} - {session.creneaux.heure_fin?.substring(0,5)})</span>{session.creneaux.public_cible && <span className="ml-2 bg-green-100 text-green-700 px-2 py-0.5 rounded text-xs">{session.creneaux.public_cible}</span>}</div><div className="flex items-center gap-2"><span className={`text-sm px-2 py-1 rounded ${session.annulee ? 'bg-red-200 text-red-800' : 'bg-green-200 text-green-800'}`}>{session.annulee ? 'Annulée' : 'Active'}</span>{!session.annulee && (<button onClick={async () => { if(confirm("Envoyer un email d'absence à tous les élèves inscrits ?")) { const res = await fetch('/api/notify-absence', { method: 'POST', body: JSON.stringify({ sessionId: session.id }) }); const data = await res.json(); if(data.success) alert(data.message); else alert("Erreur: " + data.error) } }} className="bg-red-500 text-white px-3 py-1 rounded text-xs font-bold hover:bg-red-600 transition">📧 Prévenir d'absence</button>)}</div></div>
+
           {(() => {
             const sessionDate = session.session_date; // On vérifie la validité du forfait À LA DATE DE LA SÉANCE
 
@@ -505,6 +554,7 @@ export default function AdminPage() {
               </div>
             );
           })()}
+
           </div>
         ))}
         {planningSessions.length === 0 && (<div className="text-center py-8 text-gray-400"><p>Aucune session future trouvée.</p></div>)}
@@ -530,11 +580,11 @@ export default function AdminPage() {
               let price = 0;
               switch (sub.type) {
                 case 'annuel': price = isMinor ? Number(prices.tarif_annuel_enfant) : Number(prices.tarif_annuel_adulte); break;
-                case '1_seance': price = isMinor ? Number(prices.tarif_seance_unique_enfant) : Number(prices.tarif_seance_unique_adulte); break;
+                case '1_seance': price = isMinor ? Number(prices.tarif_1_seance_enfant) : Number(prices.tarif_1_seance_adulte); break;
                 case '3_seances': price = isMinor ? Number(prices.tarif_3_seances_enfant) : Number(prices.tarif_3_seances_adulte); break;
                 case '5_seances': price = isMinor ? Number(prices.tarif_5_seances_enfant) : Number(prices.tarif_5_seances_adulte); break;
                 case '10_seances': price = isMinor ? Number(prices.tarif_10_seances_enfant) : Number(prices.tarif_10_seances_adulte); break;
-                case '1_seance_ete': price = Number(prices.tarif_seance_unique_adulte); break;
+                case '1_seance_ete': price = Number(prices.tarif_1_seance_adulte); break;
                 case '3_seances_ete': price = Number(prices.tarif_3_seances_adulte); break;
                 case '5_seances_ete': price = Number(prices.tarif_5_seances_adulte); break;
                 case '10_seances_ete': price = Number(prices.tarif_10_seances_adulte); break;
@@ -553,7 +603,7 @@ export default function AdminPage() {
           return (<><div className="bg-white p-4 rounded-xl shadow-sm border text-center"><p className="text-xs text-gray-500 uppercase font-bold">Inscriptions</p><p className="text-2xl font-bold text-green-700 mt-1">{totalInscriptions.toFixed(2)}€</p></div><div className="bg-white p-4 rounded-xl shadow-sm border text-center"><p className="text-xs text-gray-500 uppercase font-bold">Cuissons</p><p className="text-2xl font-bold text-blue-700 mt-1">{totalCuis.toFixed(2)}€</p><p className="text-xs text-gray-400 mt-1">{totalKg.toFixed(1)} kg</p></div><div className="bg-white p-4 rounded-xl shadow-sm border text-center"><p className="text-xs text-gray-500 uppercase font-bold">Encaissé</p><p className="text-2xl font-bold text-green-500 mt-1">{totalPay.toFixed(2)}€</p></div><div className={`p-4 rounded-xl shadow-sm border text-center ${solde > 0 ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}><p className="text-xs text-gray-500 uppercase font-bold">Solde dû total</p><p className={`text-2xl font-bold mt-1 ${solde > 0 ? 'text-red-600' : 'text-green-600'}`}>{solde.toFixed(2)}€</p></div></>)
         })()}
         </div>
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100"><h3 className="font-bold text-lg text-green-800 mb-4">Solde des élèves ({profiles.length})</h3><div className="overflow-x-auto">        <div className="overflow-x-auto">
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100"><h3 className="font-bold text-lg text-green-800 mb-4">Solde des élèves ({profiles.length})</h3><div className="overflow-x-auto">
         <table className="w-full text-sm text-left">
         <thead className="text-xs text-gray-500 uppercase border-b">
         <tr>
@@ -590,11 +640,11 @@ export default function AdminPage() {
             const isMinor = p.is_minor;
             switch (sub.type) {
               case 'annuel': price = isMinor ? Number(prices.tarif_annuel_enfant) : Number(prices.tarif_annuel_adulte); break;
-              case '1_seance': price = isMinor ? Number(prices.tarif_seance_unique_enfant) : Number(prices.tarif_seance_unique_adulte); break;
+              case '1_seance': price = isMinor ? Number(prices.tarif_1_seance_enfant) : Number(prices.tarif_1_seance_adulte); break;
               case '3_seances': price = isMinor ? Number(prices.tarif_3_seances_enfant) : Number(prices.tarif_3_seances_adulte); break;
               case '5_seances': price = isMinor ? Number(prices.tarif_5_seances_enfant) : Number(prices.tarif_5_seances_adulte); break;
               case '10_seances': price = isMinor ? Number(prices.tarif_10_seances_enfant) : Number(prices.tarif_10_seances_adulte); break;
-              case '1_seance_ete': price = Number(prices.tarif_seance_unique_adulte); break;
+              case '1_seance_ete': price = Number(prices.tarif_1_seance_adulte); break;
               case '3_seances_ete': price = Number(prices.tarif_3_seances_adulte); break;
               case '5_seances_ete': price = Number(prices.tarif_5_seances_adulte); break;
               case '10_seances_ete': price = Number(prices.tarif_10_seances_adulte); break;
@@ -622,10 +672,11 @@ export default function AdminPage() {
         })()}
         </tbody>
         </table>
-        </div></div></div>
+        </div></div>
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100"><h3 className="font-bold text-lg text-green-800 mb-4">Créations de l'année ({yearCreations.length} pièces)</h3>{yearCreations.length === 0 ? <p className="text-sm text-gray-400">Aucune création.</p> : (<div className="max-h-96 overflow-y-auto space-y-2">{yearCreations.map((c: any) => (<div key={c.id} className="flex justify-between items-center text-sm bg-gray-50 p-2 rounded border"><div><span className="font-medium text-gray-800">{c.piece_name || 'Sans nom'}</span><span className="text-gray-400 ml-2">par {c.profiles?.first_name} {c.profiles?.last_name}</span></div><div className="text-right"><span className="text-gray-600 mr-4">{Math.round(c.weight_kg * 1000)}g / {c.firing_passes} cuis.</span><span className="font-bold text-blue-700">{(c.cost || 0).toFixed(2)}€</span></div></div>))}</div>)}</div>
         </div>
       )}
+
       {/* ONGLET COMMUNICATION */}
       {activeTab === 'com' && (
         <div className="space-y-6">

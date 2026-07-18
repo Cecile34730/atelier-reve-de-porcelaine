@@ -38,14 +38,14 @@ type Paiement = {
 type Prices = {
   tarif_annuel_adulte: number
   tarif_annuel_enfant: number
+  tarif_1_seance_adulte: number
+  tarif_1_seance_enfant: number
   tarif_3_seances_adulte: number
   tarif_3_seances_enfant: number
   tarif_5_seances_adulte: number
   tarif_5_seances_enfant: number
   tarif_10_seances_adulte: number
   tarif_10_seances_enfant: number
-  tarif_seance_unique_adulte: number
-  tarif_seance_unique_enfant: number
   tarif_session_ete: number
 }
 
@@ -405,11 +405,11 @@ export default function DashboardPage() {
     activeSubs.forEach((sub: any) => {
       switch (sub.type) {
         case 'annuel': totalPrice += isMinor ? Number(prices.tarif_annuel_enfant) : Number(prices.tarif_annuel_adulte); break;
-        case '1_seance': totalPrice += isMinor ? Number(prices.tarif_seance_unique_enfant) : Number(prices.tarif_seance_unique_adulte); break;
+        case '1_seance': totalPrice += isMinor ? Number(prices.tarif_1_seance_enfant) : Number(prices.tarif_1_seance_adulte); break;
         case '3_seances': totalPrice += isMinor ? Number(prices.tarif_3_seances_enfant) : Number(prices.tarif_3_seances_adulte); break;
         case '5_seances': totalPrice += isMinor ? Number(prices.tarif_5_seances_enfant) : Number(prices.tarif_5_seances_adulte); break;
         case '10_seances': totalPrice += isMinor ? Number(prices.tarif_10_seances_enfant) : Number(prices.tarif_10_seances_adulte); break;
-        case '1_seance_ete': totalPrice += Number(prices.tarif_seance_unique_adulte); break;
+        case '1_seance_ete': totalPrice += Number(prices.tarif_1_seance_adulte); break;
         case '3_seances_ete': totalPrice += Number(prices.tarif_3_seances_adulte); break;
         case '5_seances_ete': totalPrice += Number(prices.tarif_5_seances_adulte); break;
         case '10_seances_ete': totalPrice += Number(prices.tarif_10_seances_adulte); break;
@@ -545,7 +545,7 @@ export default function DashboardPage() {
           <div className="space-y-3 mb-3">
           <p className="text-sm font-bold text-gray-600">Cartes à l'année :</p>
           {['1_seance', '3_seances', '5_seances', '10_seances'].map(type => {
-            const price = type === '1_seance' ? (isMinor ? prices.tarif_seance_unique_enfant : prices.tarif_seance_unique_adulte) :
+            const price = type === '1_seance' ? (isMinor ? prices.tarif_1_seance_enfant : prices.tarif_1_seance_adulte) :
             type === '3_seances' ? (isMinor ? prices.tarif_3_seances_enfant : prices.tarif_3_seances_adulte) :
             type === '5_seances' ? (isMinor ? prices.tarif_5_seances_enfant : prices.tarif_5_seances_adulte) : (isMinor ? prices.tarif_10_seances_enfant : prices.tarif_10_seances_adulte);
             const label = type === '1_seance' ? 'Séance Unitaire' : `Carte ${type.split('_')[0]} séances`;
@@ -568,7 +568,7 @@ export default function DashboardPage() {
           className={`w-full p-3 border-2 rounded-lg text-left transition text-sm ${editSubscription === '1_seance_ete' ? 'border-yellow-600 bg-yellow-100' : 'border-yellow-200 bg-white'}`}>
           <div className="flex justify-between items-center">
           <span className="font-bold text-gray-800">1 séance</span>
-          <span className="font-bold text-yellow-700">{prices.tarif_seance_unique_adulte} €</span>
+          <span className="font-bold text-yellow-700">{prices.tarif_1_seance_adulte} €</span>
           </div>
           </button>
 
