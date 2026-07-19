@@ -190,10 +190,19 @@ export default function AdminPage() {
         startYear -= 1;
       }
 
+      const todayStr = now.toISOString().split('T')[0];
       let startDate = '', endDate = '';
       if (chosenType === 'annuel') { startDate = `${startYear}-09-01`; endDate = `${startYear + 1}-06-30`; }
-      else if (chosenType.includes('_ete')) { startDate = `${startYear + 1}-07-01`; endDate = `${startYear + 1}-08-31`; }
-      else if (chosenType !== 'aucun') { startDate = `${startYear}-09-01`; endDate = `${startYear + 1}-08-31`; }
+      else if (chosenType.includes('_ete')) {
+        // Si on est en juillet/août, l'été c'est l'année en cours. Sinon, c'est l'année suivante.
+        const summerYear = (month >= 7 && month <= 8) ? startYear : startYear + 1;
+        startDate = `${summerYear}-07-01`;
+        endDate = `${summerYear}-08-31`;
+      }
+      else if (chosenType !== 'aucun') {
+        startDate = (month < 9) ? todayStr : `${startYear}-09-01`;
+        endDate = `${startYear + 1}-08-31`;
+      }
 
       const today = now.toISOString().split('T')[0];
       const yesterday = new Date(new Date().setDate(new Date().getDate() - 1)).toISOString().split('T')[0];

@@ -257,13 +257,21 @@ export default function DashboardPage() {
     if (month <= 6) {
       startYear -= 1;
     }
-    // Si on est en Juillet (7), Août (8), ou après, startYear reste l'année en cours (ex: 2026),
-    // ce qui donnera bien septembre 2026 -> juin 2027.
 
+    const todayStr = now.toISOString().split('T')[0];
     let startDate = '', endDate = '';
     if (chosenType === 'annuel') { startDate = `${startYear}-09-01`; endDate = `${startYear + 1}-06-30`; }
-    else if (chosenType.includes('_ete')) { startDate = `${startYear + 1}-07-01`; endDate = `${startYear + 1}-08-31`; }
-    else { startDate = `${startYear}-09-01`; endDate = `${startYear + 1}-08-31`; }
+    else if (chosenType.includes('_ete')) {
+      // Si on est en juillet/août, l'été c'est l'année en cours. Sinon, c'est l'année suivante.
+      const summerYear = (month >= 7 && month <= 8) ? startYear : startYear + 1;
+      startDate = `${summerYear}-07-01`;
+      endDate = `${summerYear}-08-31`;
+    }
+    else {
+      // Si on achète une carte en juillet/août, elle est active immédiatement
+      startDate = (month < 9) ? todayStr : `${startYear}-09-01`;
+      endDate = `${startYear + 1}-08-31`;
+    }
 
     // 2. Sauvegarde dans la NOUVELLE table subscriptions
     const today = now.toISOString().split('T')[0];
