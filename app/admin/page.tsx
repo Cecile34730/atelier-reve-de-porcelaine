@@ -81,9 +81,17 @@ export default function AdminPage() {
   }
 
   const getSchoolYearDates = () => {
-    const now = new Date(); const currentYear = now.getFullYear(); const currentMonth = now.getMonth();
-    let startYear = currentYear; if (currentMonth < 6) { startYear = currentYear - 1; }
-    return { start: `${startYear}-09-01`, end: `${startYear + 1}-06-30` };
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth(); // 0 = Janvier, 6 = Juillet, 7 = Août
+
+    let startYear = currentYear;
+    // Si on est avant septembre (de janvier à août), l'année scolaire a commencé l'année dernière
+    if (currentMonth < 8) {
+      startYear = currentYear - 1;
+    }
+    // ON MODIFIE LA FIN POUR INCLURE L'ÉTÉ (08-31 au lieu de 06-30)
+    return { start: `${startYear}-09-01`, end: `${startYear + 1}-08-31` };
   }
 
   const fetchYearSummary = async () => {
@@ -576,10 +584,12 @@ export default function AdminPage() {
         <div className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {(() => {
+          const { start: syStart, end: syEnd } = getSchoolYearDates();
+
           const totalInscriptions = profiles.reduce((sum, p) => {
             if (!prices) return sum;
             // On récupère TOUS les forfaits actifs pour l'année en cours
-            const activeSubs = p.subscriptions?.filter((s: any) => s.end_date >= '2025-09-01') || [];
+            const activeSubs = p.subscriptions?.filter((s: any) => s.start_date <= syEnd && s.end_date >= syStart) || [];
             if (activeSubs.length === 0) return sum;
 
             const isMinor = p.is_minor;
@@ -593,10 +603,10 @@ export default function AdminPage() {
                 case '3_seances': price = isMinor ? Number(prices.tarif_3_seances_enfant) : Number(prices.tarif_3_seances_adulte); break;
                 case '5_seances': price = isMinor ? Number(prices.tarif_5_seances_enfant) : Number(prices.tarif_5_seances_adulte); break;
                 case '10_seances': price = isMinor ? Number(prices.tarif_10_seances_enfant) : Number(prices.tarif_10_seances_adulte); break;
-                case '1_seance_ete': price = Number(prices.tarif_1_seance_adulte); break;
-                case '3_seances_ete': price = Number(prices.tarif_3_seances_adulte); break;
-                case '5_seances_ete': price = Number(prices.tarif_5_seances_adulte); break;
-                case '10_seances_ete': price = Number(prices.tarif_10_seances_adulte); break;
+                case '1_seance_ete': price = Number(prices.tarif_session_ete); break;
+                case '3_seances_ete': price = Number(prices.tarif_session_ete) * 3; break;
+                case '5_seances_ete': price = Number(prices.tarif_session_ete) * 5; break;
+                case '10_seances_ete': price = Number(prices.tarif_session_ete) * 10; break;
                 default: price = 0;
               }
               return subSum + (price || 0);
@@ -624,6 +634,8 @@ export default function AdminPage() {
         </thead>
         <tbody>
         {(() => {
+          const { start: syStart, end: syEnd } = getSchoolYearDates();
+
           // On regroupe les créations et paiements par élève pour optimiser le calcul
           const creationsByProfile = yearCreations.reduce((acc, c) => {
             acc[c.profile_id] = (acc[c.profile_id] || 0) + (c.cost || 0);
@@ -636,8 +648,7 @@ export default function AdminPage() {
           }, {} as Record<string, number>);
 
           return profiles.map(p => {
-            const today = new Date().toISOString().split('T')[0];
-            const activeSubs = p.subscriptions?.filter((s: any) => s.end_date >= today) || [];
+            const activeSubs = p.subscriptions?.filter((s: any) => s.start_date <= syEnd && s.end_date >= syStart) || [];
             const totalSessions = activeSubs.reduce((sum: number, s: any) => sum + (s.type === 'annuel' ? 0 : (s.sessions_left || 0)), 0);
             let mainType = 'Aucun';
           if (activeSubs.some((s: any) => s.type === 'annuel')) { mainType = 'Annuel'; } else if (activeSubs.length > 0) { mainType = activeSubs[0].type.replaceAll('_', ' ').replaceAll('ete', 'Été'); }
@@ -653,10 +664,10 @@ export default function AdminPage() {
               case '3_seances': price = isMinor ? Number(prices.tarif_3_seances_enfant) : Number(prices.tarif_3_seances_adulte); break;
               case '5_seances': price = isMinor ? Number(prices.tarif_5_seances_enfant) : Number(prices.tarif_5_seances_adulte); break;
               case '10_seances': price = isMinor ? Number(prices.tarif_10_seances_enfant) : Number(prices.tarif_10_seances_adulte); break;
-              case '1_seance_ete': price = Number(prices.tarif_1_seance_adulte); break;
-              case '3_seances_ete': price = Number(prices.tarif_3_seances_adulte); break;
-              case '5_seances_ete': price = Number(prices.tarif_5_seances_adulte); break;
-              case '10_seances_ete': price = Number(prices.tarif_10_seances_adulte); break;
+              case '1_seance_ete': price = Number(prices.tarif_session_ete); break;
+              case '3_seances_ete': price = Number(prices.tarif_session_ete) * 3; break;
+              case '5_seances_ete': price = Number(prices.tarif_session_ete) * 5; break;
+              case '10_seances_ete': price = Number(prices.tarif_session_ete) * 10; break;
               default: price = 0;
             }
             return subSum + (price || 0);

@@ -384,15 +384,35 @@ export default function DashboardPage() {
         alert('Erreur : ' + error.message)
       }
   }
-
   const handleGiftCardSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); setLoading(true)
+
+    // 1. On enregistre la demande dans la table gift_cards
     const { error } = await supabase.from('gift_cards').insert({
       buyer_first_name: giftForm.buyerName.split(' ')[0] || 'Anonyme', buyer_last_name: giftForm.buyerName.split(' ').slice(1).join(' ') || '',
                                                                buyer_email: giftForm.buyerEmail, receiver_first_name: giftForm.receiverName.split(' ')[0] || 'Anonyme', receiver_last_name: giftForm.receiverName.split(' ').slice(1).join(' ') || '',
                                                                message: giftForm.message, amount: parseFloat(giftForm.amount)
     })
-    if (!error) { alert('Demande enregistrée ! Cécile va vous contacter.'); setIsGiftCard(false); setGiftForm({ buyerName: '', buyerEmail: '', receiverName: '', message: '', amount: '40' }) }
+
+    if (!error) {
+      // 2. On envoie le mail à Cécile pour la prévenir
+      try {
+        await fetch('/api/send-student-request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            studentName: giftForm.buyerName,
+            requestType: 'Carte Cadeau',
+            message: `Montant: ${giftForm.amount}€\nDestinataire: ${giftForm.receiverName}\nEmail de l'acheteur: ${giftForm.buyerEmail}\nMessage: ${giftForm.message}`
+          })
+        });
+      } catch (err) {
+        console.error("Erreur d'envoi d'email", err);
+      }
+
+      alert('Demande envoyée ! Cécile va vous contacter.')
+      setIsGiftCard(false); setGiftForm({ buyerName: '', buyerEmail: '', receiverName: '', message: '', amount: '40' })
+    }
     else { alert('Erreur : ' + error.message) }
     setLoading(false)
   }
