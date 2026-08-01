@@ -43,8 +43,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: 'Aucun élève trouvé pour cette cible.' })
     }
 
-    // 3. Préparer les destinataires pour Brevo
-    const recipients = targetedStudents.map(s => ({ email: s.email, name: s.first_name }))
+    // 3. Préparer les destinataires pour Brevo (SANS DOUBLONS)
+    const uniqueStudentsMap = new Map();
+    targetedStudents.forEach(s => {
+      if (s.email && !uniqueStudentsMap.has(s.email)) {
+        uniqueStudentsMap.set(s.email, s);
+      }
+    });
+    const finalStudents = Array.from(uniqueStudentsMap.values());
+    const recipients = finalStudents.map(s => ({ email: s.email, name: s.first_name }))
 
     // 4. Envoyer via l'API Brevo
     const brevoResponse = await fetch('https://api.brevo.com/v3/smtp/email', {
@@ -67,7 +74,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `Erreur Brevo: ${errData.message}` }, { status: 500 })
     }
 
-    return NextResponse.json({ success: true, message: `Email envoyé à ${targetedStudents.length} élève(s).` })
+        return NextResponse.json({ success: true, message: `Email envoyé à ${finalStudents.length} élève(s).` })
 
   } catch (error: any) {
     console.error(error)

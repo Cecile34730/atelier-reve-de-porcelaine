@@ -647,7 +647,7 @@ export default function DashboardPage() {
           </select>
           </div>
           <div><label className="block text-sm font-medium text-gray-700">Petit message (facultatif)</label><textarea value={giftForm.message} onChange={(e) => setGiftForm({...giftForm, message: e.target.value})} className="w-full p-2 border rounded-lg bg-white text-gray-900" rows={3}></textarea></div>
-          <button type="submit" className="w-full bg-red-600 text-white font-bold py-3 rounded-lg">Valider</button>
+          <button type="submit" disabled={loading} className="w-full bg-red-600 text-white font-bold py-3 rounded-lg">Valider</button>
           </form>
           <button onClick={() => setIsGiftCard(false)} className="w-full text-gray-500 py-2 text-sm mt-2">Retour</button>
           </div>
@@ -702,7 +702,7 @@ export default function DashboardPage() {
         <label className="block text-sm font-medium text-gray-700">Message (optionnel)</label>
         <textarea value={requestMsg} onChange={(e) => setRequestMsg(e.target.value)} className="w-full p-2 border rounded-lg bg-white text-gray-900" rows={3} placeholder="Précisez votre demande..."></textarea>
         </div>
-        <button type="submit" className="bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Envoyer la demande</button>
+        <button type="submit" disabled={loading} className="bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Envoyer la demande</button>
         <button type="button" onClick={() => setShowRequestForm(false)} className="text-gray-500 text-sm ml-2 hover:underline">Annuler</button>
         </form>
         </div>

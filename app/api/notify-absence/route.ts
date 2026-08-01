@@ -22,10 +22,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Session non trouvée' }, { status: 404 })
     }
 
-    const students = sessionData.bookings.map((b: any) => {
+    const rawStudents = sessionData.bookings.map((b: any) => {
       const profile = Array.isArray(b.profiles) ? b.profiles[0] : b.profiles;
       return profile;
     }).filter((p: any) => p && p.email)
+
+    // On enlève les doublons (si un élève a deux lignes de booking pour la même séance)
+    const uniqueStudentsMap = new Map();
+    rawStudents.forEach(s => {
+      if (!uniqueStudentsMap.has(s.email)) {
+        uniqueStudentsMap.set(s.email, s);
+      }
+    });
+    const students = Array.from(uniqueStudentsMap.values());
 
     if (students.length === 0) {
       return NextResponse.json({ message: 'Aucun élève inscrit à cette séance.' })
