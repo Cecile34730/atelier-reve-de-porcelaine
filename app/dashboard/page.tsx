@@ -107,6 +107,9 @@ export default function DashboardPage() {
   const [requestType, setRequestType] = useState('seances')
   const [requestMsg, setRequestMsg] = useState('')
 
+  // Case à cocher Enfant
+  const [isChildPlan, setIsChildPlan] = useState(false)
+
   // Carte Cadeau
   const [isGiftCard, setIsGiftCard] = useState(false)
   const [giftForm, setGiftForm] = useState({ buyerName: '', buyerEmail: '', receiverName: '', message: '', amount: '40' })
@@ -115,7 +118,6 @@ export default function DashboardPage() {
     const now = new Date();
     const today = now.toISOString().split('T')[0];
 
-    // Sans .single() : évite l'erreur 406 si RLS bloque ou si pas de résultat
     const { data: profileArr } = await supabase.from('profiles').select('*').eq('id', userId);
     const profileData = profileArr && profileArr.length > 0 ? profileArr[0] : null;
 
@@ -150,7 +152,6 @@ export default function DashboardPage() {
 
       setProfile(profileData as any)
     } else {
-      // Si le profil n'est pas trouvé, on arrête le chargement sans faire planter
       console.error("Profil introuvable pour l'utilisateur", userId);
       setLoading(false);
       return;
@@ -184,10 +185,9 @@ export default function DashboardPage() {
     .order('session_date', { ascending: true })
 
     if (sessionsData && profileData) {
-      // On supprime le filtre adulte/enfant, on affiche TOUT
+      // On affiche toutes les séances normales (enfant/ado/tous) sans filtrer par le profil
       let filteredSessions = sessionsData.filter(s => {
         const pub = (s.creneaux as any).public_cible?.toLowerCase();
-        // On garde juste les séances normales et l'été (le filtre été se fera plus loin)
         return pub === 'tous' || pub === 'été' || pub?.includes('enfant') || pub?.includes('ado');
       });
       setSessions(filteredSessions as any)
@@ -202,8 +202,6 @@ export default function DashboardPage() {
   useEffect(() => {
     let mounted = true;
 
-    // 1. On configure l'écouteur d'événements EN PREMIER.
-    // C'est lui qui va attraper le ?code=... du lien sur lequel on a cliqué.
     const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'PASSWORD_RECOVERY' && mounted) {
         setIsRecoveryMode(true);
@@ -212,7 +210,6 @@ export default function DashboardPage() {
       }
     });
 
-    // 2. Ensuite on initialise l'application normalement
     const initAuth = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (user && mounted) { await fetchUserData(user.id); }
@@ -221,12 +218,11 @@ export default function DashboardPage() {
 
     initAuth();
 
-    // 3. Nettoyage en quittant
     return () => {
       mounted = false;
       authListener.subscription.unsubscribe();
     }
-  }, []) // Le tableau de dépendances reste vide
+  }, [])
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault(); setErrorLogin('')
@@ -248,12 +244,11 @@ export default function DashboardPage() {
     (chosenType.includes('5') ? 5 :
     (chosenType.includes('3') ? 3 : 1)))
 
-    // 1. Calcul des dates (CORRECTION DU BUG D'ANNÉE)
+    // 1. Calcul des dates
     const now = new Date();
     let startYear = now.getFullYear();
-    const month = now.getMonth() + 1; // 1 = Janvier, 7 = Juillet, etc.
+    const month = now.getMonth() + 1;
 
-    // Si on est entre Janvier et Juin, l'année scolaire a commencé l'année dernière
     if (month <= 6) {
       startYear -= 1;
     }
@@ -262,18 +257,16 @@ export default function DashboardPage() {
     let startDate = '', endDate = '';
     if (chosenType === 'annuel') { startDate = `${startYear}-09-01`; endDate = `${startYear + 1}-06-30`; }
     else if (chosenType.includes('_ete')) {
-      // Si on est en juillet/août, l'été c'est l'année en cours. Sinon, c'est l'année suivante.
       const summerYear = (month >= 7 && month <= 8) ? startYear : startYear + 1;
       startDate = `${summerYear}-07-01`;
       endDate = `${summerYear}-08-31`;
     }
     else {
-      // Si on achète une carte en juillet/août, elle est active immédiatement
       startDate = (month < 9) ? todayStr : `${startYear}-09-01`;
       endDate = `${startYear + 1}-08-31`;
     }
 
-    // 2. Sauvegarde dans la NOUVELLE table subscriptions
+    // 2. Sauvegarde dans la table subscriptions
     const today = now.toISOString().split('T')[0];
     const { data: existingSub } = await supabase
     .from('subscriptions')
@@ -286,13 +279,11 @@ export default function DashboardPage() {
     let error = null;
 
     if (existingSub) {
-      // Si l'élève recharge le MÊME forfait, on additionne les séances
       const res = await supabase.from('subscriptions').update({
         sessions_left: (existingSub.sessions_left || 0) + sessionsToAdd
       }).eq('id', existingSub.id);
       error = res.error;
     } else {
-      // Sinon, on crée un NOUVEAU forfait
       const res = await supabase.from('subscriptions').insert({
         profile_id: profile.id,
         type: chosenType,
@@ -304,20 +295,16 @@ export default function DashboardPage() {
     }
 
     if (!error) {
-      // NOUVEAU : On enregistre le créneau choisi ET le statut enfant/ado si forfait annuel
-      if (chosenType === 'annuel' && selectedCreneauId) {
-        // On vérifie si le créneau choisi est un créneau enfant
-        const chosenCreneau = creneaux.find(c => c.id === selectedCreneauId);
-        const shouldBeMinor = chosenCreneau?.public_cible?.toLowerCase().includes('enfant') || false;
-
-        await supabase.from('profiles').update({
-          creneau_id: selectedCreneauId,
-          is_minor: shouldBeMinor // On met à jour le profil automatiquement !
-        }).eq('id', profile.id);
+      // 3. On met à jour le profil (is_minor et creneau_id)
+      if (isChildPlan !== profile.is_minor || (chosenType === 'annuel' && selectedCreneauId)) {
+        const updateData: any = { is_minor: isChildPlan };
+        if (chosenType === 'annuel' && selectedCreneauId) {
+          updateData.creneau_id = selectedCreneauId;
+        }
+        await supabase.from('profiles').update(updateData).eq('id', profile.id);
       }
 
       try {
-        // On recharge les données en toute sécurité
         await fetchUserData(profile.id);
       } catch (e) {
         console.error("Erreur lors du rechargement après achat", e);
@@ -369,7 +356,6 @@ export default function DashboardPage() {
         message: requestMsg
       })
       if (!error) {
-        // 2. Envoi du mail à Cécile
         try {
           await fetch('/api/send-student-request', {
             method: 'POST',
@@ -394,7 +380,6 @@ export default function DashboardPage() {
   const handleGiftCardSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); setLoading(true)
 
-    // 1. On enregistre la demande dans la table gift_cards
     const { error } = await supabase.from('gift_cards').insert({
       buyer_first_name: giftForm.buyerName.split(' ')[0] || 'Anonyme', buyer_last_name: giftForm.buyerName.split(' ').slice(1).join(' ') || '',
                                                                buyer_email: giftForm.buyerEmail, receiver_first_name: giftForm.receiverName.split(' ')[0] || 'Anonyme', receiver_last_name: giftForm.receiverName.split(' ').slice(1).join(' ') || '',
@@ -402,7 +387,6 @@ export default function DashboardPage() {
     })
 
     if (!error) {
-      // 2. On envoie le mail à Cécile pour la prévenir
       try {
         await fetch('/api/send-student-request', {
           method: 'POST',
@@ -444,7 +428,6 @@ export default function DashboardPage() {
         case '3_seances': totalPrice += isMinor ? Number(prices.tarif_3_seances_enfant) : Number(prices.tarif_3_seances_adulte); break;
         case '5_seances': totalPrice += isMinor ? Number(prices.tarif_5_seances_enfant) : Number(prices.tarif_5_seances_adulte); break;
         case '10_seances': totalPrice += isMinor ? Number(prices.tarif_10_seances_enfant) : Number(prices.tarif_10_seances_adulte); break;
-        // CORRECTION ICI : On utilise tarif_session_ete pour l'été
         case '1_seance_ete': totalPrice += Number(prices.tarif_session_ete); break;
         case '3_seances_ete': totalPrice += Number(prices.tarif_session_ete) * 3; break;
         case '5_seances_ete': totalPrice += Number(prices.tarif_session_ete) * 5; break;
@@ -545,7 +528,7 @@ export default function DashboardPage() {
         <div className="max-w-md mx-auto bg-white rounded-2xl shadow-lg p-6 text-center border-t-4 border-yellow-400">
         <h1 className="text-2xl font-bold text-green-800 mb-2">Bonjour {profile.first_name} 👋</h1>
         <p className="text-gray-600 mb-6">Choisissez une formule pour réserver.</p>
-        <button onClick={() => setChoosingPlan(true)} className="w-full bg-yellow-400 text-green-900 font-bold py-3 rounded-lg text-lg">Choisir mon forfait</button>
+        <button onClick={() => { setChoosingPlan(true); setIsChildPlan(profile.is_minor); }} className="w-full bg-yellow-400 text-green-900 font-bold py-3 rounded-lg text-lg">Choisir mon forfait</button>
         <button onClick={async () => { await supabase.auth.signOut(); setProfile(null); }} className="mt-4 w-full text-gray-500 py-2 text-sm">Déconnexion</button>
         </div>
         </div>
@@ -553,7 +536,7 @@ export default function DashboardPage() {
     }
 
     if (choosingPlan && prices) {
-      const isMinor = profile.is_minor
+      const isMinor = isChildPlan; // Le prix dépend maintenant de la case à cocher
       return (
         <div className="min-h-screen bg-green-50 p-6">
         <div className="max-w-md mx-auto bg-white rounded-2xl shadow-lg p-6">
@@ -561,38 +544,28 @@ export default function DashboardPage() {
           <>
           <h2 className="text-xl font-bold text-green-800 mb-4 text-center">Choisissez votre formule</h2>
 
-          <div className={`p-4 border-2 rounded-xl transition mb-3 ${editSubscription === 'annuel' ? 'border-green-600 bg-green-50' : 'border-gray-200 bg-white'}`}>
-          {/* On calcule si le créneau sélectionné est pour les enfants */}
-          {(() => {
-            const selectedCreneau = creneaux.find(c => c.id === selectedCreneauId);
-            const isMinorSlot = selectedCreneau?.public_cible?.toLowerCase().includes('enfant');
-            // Par défaut, on garde le statut du profil, ou on prend celui du créneau choisi
-            const displayIsMinor = selectedCreneauId ? !!isMinorSlot : profile.is_minor;
+          {/* LA CASE À COCHER ENFANT/ADO */}
+          <div className="flex items-center gap-2 mb-4 p-3 bg-yellow-50 rounded-lg border border-yellow-200 cursor-pointer" onClick={() => setIsChildPlan(!isChildPlan)}>
+          <input type="checkbox" checked={isChildPlan} onChange={(e) => setIsChildPlan(e.target.checked)} className="w-4 h-4 cursor-pointer" />
+          <label className="text-sm font-medium text-yellow-800 cursor-pointer">🎓 Je m'inscris pour mon enfant (Tarif Enfant/Ado)</label>
+          </div>
 
-            return (
-              <>
-              <button onClick={() => { setEditSubscription('annuel'); setSelectedCreneauId('') }} className="w-full text-left">
-              <div className="font-bold text-green-800">Forfait Annuel</div>
-              {/* Le prix s'adapte automatiquement selon le créneau choisi */}
-              <div className="text-green-600 font-bold text-xl">{displayIsMinor ? `${prices.tarif_annuel_enfant} €` : `${prices.tarif_annuel_adulte} €`}</div>
-              </button>
-              {editSubscription === 'annuel' && (
-                <div className="mt-3 border-t pt-3">
-                <select value={selectedCreneauId} onChange={(e) => setSelectedCreneauId(e.target.value)} className="w-full p-2 border rounded-lg bg-white text-gray-900" required>
-                <option value="">-- Sélectionner un jour --</option>
-                {/* On enlève le filtre pour montrer TOUS les créneaux, avec une mention pour les enfants */}
-                {creneaux.map(c => (
-                  <option key={c.id} value={c.id}>
-                  {c.jour} {c.heure_debut.substring(0,5)} - {c.heure_fin.substring(0,5)}
-                  {c.public_cible?.toLowerCase().includes('enfant') ? ' (Enfant/Ado)' : ''}
-                  </option>
-                ))}
-                </select>
-                </div>
-              )}
-              </>
-            );
-          })()}
+          <div className={`p-4 border-2 rounded-xl transition mb-3 ${editSubscription === 'annuel' ? 'border-green-600 bg-green-50' : 'border-gray-200 bg-white'}`}>
+          <button onClick={() => { setEditSubscription('annuel'); setSelectedCreneauId('') }} className="w-full text-left">
+          <div className="font-bold text-green-800">Forfait Annuel</div>
+          <div className="text-green-600 font-bold text-xl">{isMinor ? `${prices.tarif_annuel_enfant} €` : `${prices.tarif_annuel_adulte} €`}</div>
+          </button>
+          {editSubscription === 'annuel' && (
+            <div className="mt-3 border-t pt-3">
+            <select value={selectedCreneauId} onChange={(e) => setSelectedCreneauId(e.target.value)} className="w-full p-2 border rounded-lg bg-white text-gray-900" required>
+            <option value="">-- Sélectionner un jour --</option>
+            {/* SI case cochée -> on ne montre QUE les créneaux enfants. Sinon, que les créneaux adultes */}
+            {creneaux.filter(c => isChildPlan ? (c.public_cible as any)?.toLowerCase().includes('enfant') : (c.public_cible as any)?.toLowerCase().includes('ado')).map(c => (
+              <option key={c.id} value={c.id}>{c.jour} {c.heure_debut.substring(0,5)} - {c.heure_fin.substring(0,5)}</option>
+            ))}
+            </select>
+            </div>
+          )}
           </div>
 
           <div className="space-y-3 mb-3">
@@ -617,7 +590,6 @@ export default function DashboardPage() {
           <h3 className="font-bold text-yellow-800 text-lg mb-3">☀️ Cours d'Été (Tous publics)</h3>
           <div className="space-y-2">
 
-          {/* CORRECTION ICI : On utilise tarif_session_ete pour l'été */}
           <button onClick={() => { setEditSubscription('1_seance_ete'); setSelectedCreneauId(''); }}
           className={`w-full p-3 border-2 rounded-lg text-left transition text-sm ${editSubscription === '1_seance_ete' ? 'border-yellow-600 bg-yellow-100' : 'border-yellow-200 bg-white'}`}>
           <div className="flex justify-between items-center">
