@@ -166,7 +166,7 @@ export default function DashboardPage() {
         const { data: paiementsData } = await supabase.from('paiements').select('*').eq('profile_id', userId).order('date_paiement', { ascending: false })
         if (paiementsData) setPaiements(paiementsData)
 
-          const { data: creneauxData } = await supabase.from('creneaux').select('*').eq('actif', true)
+          const { data: creneauxData } = await supabase.from('creneaux').select('*')
           if (creneauxData) setCreneaux(creneauxData)
 
             let startYear = now.getFullYear();
@@ -184,11 +184,11 @@ export default function DashboardPage() {
     .order('session_date', { ascending: true })
 
     if (sessionsData && profileData) {
+      // On supprime le filtre adulte/enfant, on affiche TOUT
       let filteredSessions = sessionsData.filter(s => {
-        const pub = (s.creneaux as any).public_cible;
-        if (pub === 'ete' || pub === 'tous' || pub === 'été') return true;
-        if (profileData.is_minor) return pub?.startsWith('enfants');
-        return pub === 'ado et adultes';
+        const pub = (s.creneaux as any).public_cible?.toLowerCase();
+        // On garde juste les séances normales et l'été (le filtre été se fera plus loin)
+        return pub === 'tous' || pub === 'été' || pub?.includes('enfant') || pub?.includes('ado');
       });
       setSessions(filteredSessions as any)
     }
@@ -304,9 +304,16 @@ export default function DashboardPage() {
     }
 
     if (!error) {
-      // NOUVEAU : On enregistre le créneau choisi dans le profil de l'élève si forfait annuel
+      // NOUVEAU : On enregistre le créneau choisi ET le statut enfant/ado si forfait annuel
       if (chosenType === 'annuel' && selectedCreneauId) {
-        await supabase.from('profiles').update({ creneau_id: selectedCreneauId }).eq('id', profile.id);
+        // On vérifie si le créneau choisi est un créneau enfant
+        const chosenCreneau = creneaux.find(c => c.id === selectedCreneauId);
+        const shouldBeMinor = chosenCreneau?.public_cible?.toLowerCase().includes('enfant') || false;
+
+        await supabase.from('profiles').update({
+          creneau_id: selectedCreneauId,
+          is_minor: shouldBeMinor // On met à jour le profil automatiquement !
+        }).eq('id', profile.id);
       }
 
       try {
@@ -437,10 +444,11 @@ export default function DashboardPage() {
         case '3_seances': totalPrice += isMinor ? Number(prices.tarif_3_seances_enfant) : Number(prices.tarif_3_seances_adulte); break;
         case '5_seances': totalPrice += isMinor ? Number(prices.tarif_5_seances_enfant) : Number(prices.tarif_5_seances_adulte); break;
         case '10_seances': totalPrice += isMinor ? Number(prices.tarif_10_seances_enfant) : Number(prices.tarif_10_seances_adulte); break;
-        case '1_seance_ete': totalPrice += Number(prices.tarif_1_seance_adulte); break;
-        case '3_seances_ete': totalPrice += Number(prices.tarif_3_seances_adulte); break;
-        case '5_seances_ete': totalPrice += Number(prices.tarif_5_seances_adulte); break;
-        case '10_seances_ete': totalPrice += Number(prices.tarif_10_seances_adulte); break;
+        // CORRECTION ICI : On utilise tarif_session_ete pour l'été
+        case '1_seance_ete': totalPrice += Number(prices.tarif_session_ete); break;
+        case '3_seances_ete': totalPrice += Number(prices.tarif_session_ete) * 3; break;
+        case '5_seances_ete': totalPrice += Number(prices.tarif_session_ete) * 5; break;
+        case '10_seances_ete': totalPrice += Number(prices.tarif_session_ete) * 10; break;
         default: break;
       }
     });
@@ -554,20 +562,37 @@ export default function DashboardPage() {
           <h2 className="text-xl font-bold text-green-800 mb-4 text-center">Choisissez votre formule</h2>
 
           <div className={`p-4 border-2 rounded-xl transition mb-3 ${editSubscription === 'annuel' ? 'border-green-600 bg-green-50' : 'border-gray-200 bg-white'}`}>
-          <button onClick={() => { setEditSubscription('annuel'); setSelectedCreneauId('') }} className="w-full text-left">
-          <div className="font-bold text-green-800">Forfait Annuel</div>
-          <div className="text-green-600 font-bold text-xl">{isMinor ? `${prices.tarif_annuel_enfant} €` : `${prices.tarif_annuel_adulte} €`}</div>
-          </button>
-          {editSubscription === 'annuel' && (
-            <div className="mt-3 border-t pt-3">
-            <select value={selectedCreneauId} onChange={(e) => setSelectedCreneauId(e.target.value)} className="w-full p-2 border rounded-lg bg-white text-gray-900" required>
-            <option value="">-- Sélectionner un jour --</option>
-            {creneaux.filter(c => isMinor ? (c.public_cible as any)?.startsWith('enfants') : (c.public_cible as any) === 'ado et adultes').map(c => (
-              <option key={c.id} value={c.id}>{c.jour} {c.heure_debut.substring(0,5)} - {c.heure_fin.substring(0,5)}</option>
-            ))}
-            </select>
-            </div>
-          )}
+          {/* On calcule si le créneau sélectionné est pour les enfants */}
+          {(() => {
+            const selectedCreneau = creneaux.find(c => c.id === selectedCreneauId);
+            const isMinorSlot = selectedCreneau?.public_cible?.toLowerCase().includes('enfant');
+            // Par défaut, on garde le statut du profil, ou on prend celui du créneau choisi
+            const displayIsMinor = selectedCreneauId ? !!isMinorSlot : profile.is_minor;
+
+            return (
+              <>
+              <button onClick={() => { setEditSubscription('annuel'); setSelectedCreneauId('') }} className="w-full text-left">
+              <div className="font-bold text-green-800">Forfait Annuel</div>
+              {/* Le prix s'adapte automatiquement selon le créneau choisi */}
+              <div className="text-green-600 font-bold text-xl">{displayIsMinor ? `${prices.tarif_annuel_enfant} €` : `${prices.tarif_annuel_adulte} €`}</div>
+              </button>
+              {editSubscription === 'annuel' && (
+                <div className="mt-3 border-t pt-3">
+                <select value={selectedCreneauId} onChange={(e) => setSelectedCreneauId(e.target.value)} className="w-full p-2 border rounded-lg bg-white text-gray-900" required>
+                <option value="">-- Sélectionner un jour --</option>
+                {/* On enlève le filtre pour montrer TOUS les créneaux, avec une mention pour les enfants */}
+                {creneaux.map(c => (
+                  <option key={c.id} value={c.id}>
+                  {c.jour} {c.heure_debut.substring(0,5)} - {c.heure_fin.substring(0,5)}
+                  {c.public_cible?.toLowerCase().includes('enfant') ? ' (Enfant/Ado)' : ''}
+                  </option>
+                ))}
+                </select>
+                </div>
+              )}
+              </>
+            );
+          })()}
           </div>
 
           <div className="space-y-3 mb-3">
@@ -592,11 +617,12 @@ export default function DashboardPage() {
           <h3 className="font-bold text-yellow-800 text-lg mb-3">☀️ Cours d'Été (Tous publics)</h3>
           <div className="space-y-2">
 
+          {/* CORRECTION ICI : On utilise tarif_session_ete pour l'été */}
           <button onClick={() => { setEditSubscription('1_seance_ete'); setSelectedCreneauId(''); }}
           className={`w-full p-3 border-2 rounded-lg text-left transition text-sm ${editSubscription === '1_seance_ete' ? 'border-yellow-600 bg-yellow-100' : 'border-yellow-200 bg-white'}`}>
           <div className="flex justify-between items-center">
           <span className="font-bold text-gray-800">1 séance</span>
-          <span className="font-bold text-yellow-700">{prices.tarif_1_seance_adulte} €</span>
+          <span className="font-bold text-yellow-700">{prices.tarif_session_ete} €</span>
           </div>
           </button>
 
@@ -604,7 +630,7 @@ export default function DashboardPage() {
           className={`w-full p-3 border-2 rounded-lg text-left transition text-sm ${editSubscription === '3_seances_ete' ? 'border-yellow-600 bg-yellow-100' : 'border-yellow-200 bg-white'}`}>
           <div className="flex justify-between items-center">
           <span className="font-bold text-gray-800">3 séances</span>
-          <span className="font-bold text-yellow-700">{prices.tarif_3_seances_adulte} €</span>
+          <span className="font-bold text-yellow-700">{Number(prices.tarif_session_ete) * 3} €</span>
           </div>
           </button>
 
@@ -612,7 +638,7 @@ export default function DashboardPage() {
           className={`w-full p-3 border-2 rounded-lg text-left transition text-sm ${editSubscription === '5_seances_ete' ? 'border-yellow-600 bg-yellow-100' : 'border-yellow-200 bg-white'}`}>
           <div className="flex justify-between items-center">
           <span className="font-bold text-gray-800">5 séances</span>
-          <span className="font-bold text-yellow-700">{prices.tarif_5_seances_adulte} €</span>
+          <span className="font-bold text-yellow-700">{Number(prices.tarif_session_ete) * 5} €</span>
           </div>
           </button>
 
@@ -620,7 +646,7 @@ export default function DashboardPage() {
           className={`w-full p-3 border-2 rounded-lg text-left transition text-sm ${editSubscription === '10_seances_ete' ? 'border-yellow-600 bg-yellow-100' : 'border-yellow-200 bg-white'}`}>
           <div className="flex justify-between items-center">
           <span className="font-bold text-gray-800">10 séances</span>
-          <span className="font-bold text-yellow-700">{prices.tarif_10_seances_adulte} €</span>
+          <span className="font-bold text-yellow-700">{Number(prices.tarif_session_ete) * 10} €</span>
           </div>
           </button>
 
@@ -794,7 +820,8 @@ export default function DashboardPage() {
             <div key={session.id} className="flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-100">
             <div>
             <div className="font-semibold text-green-800 capitalize">{dateStr}</div>
-            <div className="text-xs text-gray-500">De {heureDebut} à {heureFin}</div>
+            {/* On ajoute la mention Enfant/Ado si le créneau est concerné */}
+            <div className="text-xs text-gray-500">De {heureDebut} à {heureFin} {(session.creneaux as any).public_cible?.toLowerCase().includes('enfant') && <span className="ml-2 text-orange-600 font-bold">(Enfant/Ado)</span>}</div>
             </div>
             <div>
             {profile.subscription_type === 'annuel' ? (
@@ -825,4 +852,4 @@ export default function DashboardPage() {
       </div>
       </div>
     )
-  }
+}
