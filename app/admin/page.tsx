@@ -589,7 +589,8 @@ export default function AdminPage() {
           const totalInscriptions = profiles.reduce((sum, p) => {
             if (!prices) return sum;
             // On récupère TOUS les forfaits actifs pour l'année en cours
-            const activeSubs = p.subscriptions?.filter((s: any) => s.start_date <= syEnd && s.end_date >= syStart) || [];
+            const today = new Date().toISOString().split('T')[0];
+            const activeSubs = p.subscriptions?.filter((s: any) => s.end_date >= today) || [];
             if (activeSubs.length === 0) return sum;
 
             const isMinor = p.is_minor;
@@ -648,7 +649,8 @@ export default function AdminPage() {
           }, {} as Record<string, number>);
 
           return profiles.map(p => {
-            const activeSubs = p.subscriptions?.filter((s: any) => s.start_date <= syEnd && s.end_date >= syStart) || [];
+            const today = new Date().toISOString().split('T')[0];
+            const activeSubs = p.subscriptions?.filter((s: any) => s.end_date >= today) || [];
             const totalSessions = activeSubs.reduce((sum: number, s: any) => sum + (s.type === 'annuel' ? 0 : (s.sessions_left || 0)), 0);
             let mainType = 'Aucun';
           if (activeSubs.some((s: any) => s.type === 'annuel')) { mainType = 'Annuel'; } else if (activeSubs.length > 0) { mainType = activeSubs[0].type.replaceAll('_', ' ').replaceAll('ete', 'Été'); }
