@@ -151,16 +151,15 @@ export default function Home() {
     {/* 7. MATÉRIAUX & CUISSONS (TEXTE POETIQUE MANUSCRIT) */}
     <div className="bg-white py-16 px-4">
     <div className="max-w-3xl mx-auto text-center">
-    <h2 className="text-3xl font-bold text-green-800 mb-10">Matériaux & Cuissons</h2>
+    <h2 className="text-3xl font-bold text-green-800 mb-10"> Coût Matériaux & Cuissons</h2>
 
     <div className={`text-2xl md:text-3xl text-gray-900 leading-snug space-y-1 ${caveat.className}`}>
     <p>Les argiles utilisées sont des faïences de couleurs différentes : <strong>Ivoire, Rouge ou Noire</strong>.</p>
-    <p>La texture peut varier en fonction du projet (argile lisse ou chamotée).</p>
     <p>Les pièces sont décorées avec une peinture spéciale pour céramique (engobes).</p>
-    <p>L’émaillage réalisé par les élèves permet de rendre la pièce imperméable et peut ainsi être utilisée à des fins alimentaires.</p>
+    <p>Après la première cuisson, les pièces peuvent être émaillées et cuite une seconde fois afin de les rendres imperméables et utilisables à des fins alimentaires.</p>
 
     <div className="pt-6 mt-6 border-t border-green-100">
-    <p className="mb-4 font-bold text-green-800 text-3xl md:text-4xl">Coût :</p>
+    <p className="mb-4 font-bold text-green-800 text-3xl md:text-4xl">Coût Cuisson:</p>
     <p><span className="text-red-600 font-bold text-3xl md:text-4xl">6 €</span> le kg de terre pour 1 cuisson (décoration aux engobes)</p>
     <p><span className="text-red-600 font-bold text-3xl md:text-4xl">10 €</span> le kg de terre pour 2 cuissons + émaillage</p>
     </div>
