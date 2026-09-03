@@ -185,10 +185,14 @@ export default function DashboardPage() {
     .order('session_date', { ascending: true })
 
     if (sessionsData && profileData) {
-      // On affiche toutes les séances normales (enfant/ado/tous) sans filtrer par le profil
       let filteredSessions = sessionsData.filter(s => {
         const pub = (s.creneaux as any).public_cible?.toLowerCase();
-        return pub === 'tous' || pub === 'été' || pub?.includes('enfant') || pub?.includes('ado');
+        // On affiche les séances mixtes (tous/été)
+        if (pub === 'tous' || pub === 'été') return true;
+        // Si l'élève est mineur (case cochée), on n'affiche que les séances "enfant"
+        if (profileData.is_minor) return pub?.includes('enfant');
+        // Sinon, on n'affiche que les séances "ado/adulte"
+        return pub?.includes('ado');
       });
       setSessions(filteredSessions as any)
     }

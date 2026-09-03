@@ -110,7 +110,7 @@ export default function Home() {
     </thead>
     <tbody>
     <tr className="border-b bg-green-50"><td className="p-3 font-semibold">Mardi</td><td className="p-3">Ado et adultes</td><td className="p-3">19h - 21h</td></tr>
-    <tr className="border-b"><td className="p-3 font-semibold" rowSpan={2}>Mercredi</td><td className="p-3">Enfants 5-8 ans</td><td className="p-3">10h30 - 12h</td></tr>
+    <tr className="border-b"><td className="p-3 font-semibold" rowSpan={2}>Mercredi</td><td className="p-3">Enfants 5-10 ans</td><td className="p-3">10h30 - 12h</td></tr>
     <tr className="border-b bg-green-50"><td className="p-3">Ado et adultes</td><td className="p-3">17h - 19h</td></tr>
     <tr className="border-b"><td className="p-3 font-semibold" rowSpan={2}>Jeudi</td><td className="p-3">Ado et adultes</td><td className="p-3">14h - 16h</td></tr>
     <tr className="border-b bg-green-50"><td className="p-3">Ado et adultes</td><td className="p-3">19h - 21h</td></tr>
@@ -126,7 +126,7 @@ export default function Home() {
     <h2 className="text-3xl font-bold text-green-800 text-center mb-8">Formules et Tarifs</h2>
     <div className="grid md:grid-cols-2 gap-6">
     <div className="bg-yellow-50 p-6 rounded-xl border border-yellow-200">
-    <h3 className="font-bold text-xl text-yellow-800 mb-4 text-center">Enfants</h3>
+    <h3 className="font-bold text-xl text-yellow-800 mb-4 text-center">Mercredi Matin Enfants</h3>
     <div className="space-y-2">
     <div className="flex justify-between py-2 border-b border-yellow-200"><span>1 séance</span><span className="font-bold">30 €</span></div>
     <div className="flex justify-between py-2 border-b border-yellow-200"><span>3 séances</span><span className="font-bold">80 €</span></div>
