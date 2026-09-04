@@ -552,7 +552,16 @@ export default function AdminPage() {
             }));
 
             // 3. On fusionne les deux listes
-            const allAttendees = [...annualAttendees, ...cardAttendees];
+            const rawAttendees = [...annualAttendees, ...cardAttendees];
+
+            // 4. ON DÉDOUBLONNE (pour éviter qu'un annuel apparaisse 2 fois s'il a un vieux booking)
+            const uniqueAttendeesMap = new Map();
+            rawAttendees.forEach(a => {
+              if (!uniqueAttendeesMap.has(a.id)) {
+                uniqueAttendeesMap.set(a.id, a);
+              }
+            });
+            const allAttendees = Array.from(uniqueAttendeesMap.values());
             const presentCount = allAttendees.filter(a => !a.isAbsent).length;
 
             return (
