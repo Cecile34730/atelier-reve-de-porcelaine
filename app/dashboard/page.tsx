@@ -167,7 +167,7 @@ export default function DashboardPage() {
         const { data: paiementsData } = await supabase.from('paiements').select('*').eq('profile_id', userId).order('date_paiement', { ascending: false })
         if (paiementsData) setPaiements(paiementsData)
 
-          const { data: creneauxData } = await supabase.from('creneaux').select('*')
+          const { data: creneauxData } = await supabase.from('creneaux').select('*').eq('actif', true)
           if (creneauxData) setCreneaux(creneauxData)
 
             let startYear = now.getFullYear();
@@ -179,7 +179,8 @@ export default function DashboardPage() {
 
     const { data: sessionsData } = await supabase
     .from('sessions')
-    .select(`id, session_date, creneau_id, creneaux ( jour, heure_debut, heure_fin, public_cible )`)
+    .select(`id, session_date, creneau_id, creneaux ( jour, heure_debut, heure_fin, public_cible, actif )`)
+    .eq('creneaux.actif', true)
     .gte('session_date', today)
     .lte('session_date', endDateLimit)
     .order('session_date', { ascending: true })
