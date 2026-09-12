@@ -180,15 +180,17 @@ export default function DashboardPage() {
     const { data: sessionsData } = await supabase
     .from('sessions')
     .select(`id, session_date, creneau_id, creneaux ( jour, heure_debut, heure_fin, public_cible, actif )`)
-    .eq('creneaux.actif', true)
     .gte('session_date', today)
     .lte('session_date', endDateLimit)
     .order('session_date', { ascending: true })
 
     if (sessionsData && profileData) {
       let filteredSessions = sessionsData.filter(s => {
-        const pub = (s.creneaux as any).public_cible?.toLowerCase();
-        // On affiche les séances mixtes (tous/été)
+        const c = s.creneaux as any;
+        // On cache les créneaux inactifs (comme le mardi 17h30)
+        if (c.actif === false) return false;
+
+        const pub = c.public_cible?.toLowerCase();
         if (pub === 'tous' || pub === 'été') return true;
         // Si l'élève est mineur (case cochée), on n'affiche que les séances "enfant"
         if (profileData.is_minor) return pub?.includes('enfant');
