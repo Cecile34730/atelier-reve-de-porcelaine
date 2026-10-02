@@ -419,11 +419,16 @@ export default function DashboardPage() {
   const totalPaiements = paiements.reduce((sum, p) => sum + p.montant, 0)
 
   const getSubscriptionPrice = () => {
-    if (!prices || !profile) return 0
-      if (profile.custom_subscription_price) return profile.custom_subscription_price
+      if (!prices || !profile) return 0
 
-        const activeSubs = profile.subscriptions || [];
-    if (activeSubs.length === 0) return 0;
+          const today = new Date().toISOString().split('T')[0];
+      const activeSubs = profile.subscriptions?.filter((s: any) => s.end_date >= today) || [];
+
+      // Si l'élève n'a aucun forfait actif, le prix est de 0
+      if (activeSubs.length === 0) return 0;
+
+      // S'il a un forfait actif, on utilise le prix personnalisé s'il existe
+      if (profile.custom_subscription_price) return profile.custom_subscription_price
 
     const isMinor = profile.is_minor;
     let totalPrice = 0;

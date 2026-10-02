@@ -35,6 +35,7 @@ export default function AdminPage() {
   const [creations, setCreations] = useState<Creation[]>([])
   const [paiements, setPaiements] = useState<Paiement[]>([])
   const [studentSubscriptions, setStudentSubscriptions] = useState<any[]>([])
+  const [allPaiements, setAllPaiements] = useState<any[]>([])
 
   const [newCreation, setNewCreation] = useState({ piece_name: '', weight_kg: '', firing_passes: 1 })
   const [newPaiement, setNewPaiement] = useState({ montant: '', date_paiement: new Date().toISOString().split('T')[0], mode: 'especes', note: '' })
@@ -95,11 +96,18 @@ export default function AdminPage() {
   }
 
   const fetchYearSummary = async () => {
-    const { start, end } = getSchoolYearDates();
-    const { data: cData } = await supabase.from('creations').select('*, profiles ( first_name, last_name )').gte('created_at', start).lte('created_at', end + 'T23:59:59');
-    if (cData) setYearCreations(cData);
-    const { data: pData } = await supabase.from('paiements').select('*').gte('date_paiement', start).lte('date_paiement', end);
-    if (pData) setYearPaiement(pData);
+      const { start, end } = getSchoolYearDates();
+      // 1. On récupère les créations de l'année pour le total en haut
+      const { data: cData } = await supabase.from('creations').select('*, profiles ( first_name, last_name )').gte('created_at', start).lte('created_at', end + 'T23:59:59');
+      if (cData) setYearCreations(cData);
+
+      // 2. On récupère les paiements de l'année pour le total en haut
+      const { data: pData } = await supabase.from('paiements').select('*').gte('date_paiement', start).lte('date_paiement', end);
+      if (pData) setYearPaiement(pData);
+
+      // 3. NOUVEAU : On récupère TOUS les paiements (sans date) pour calculer le vrai solde dû de chaque élève
+      const { data: allPData } = await supabase.from('paiements').select('*');
+      if (allPData) setAllPaiements(allPData);
   }
 
   useEffect(() => {
@@ -605,29 +613,31 @@ export default function AdminPage() {
             const isMinor = p.is_minor;
 
             // On utilise le prix personnalisé s'il existe, sinon on additionne le prix de CHAQUE forfait actif
-            let studentTotal = 0;
-            if (p.custom_subscription_price !== null && p.custom_subscription_price !== undefined) {
-              studentTotal = Number(p.custom_subscription_price);
-            } else {
-              studentTotal = activeSubs.reduce((subSum, sub) => {
-                let price = 0;
-                switch (sub.type) {
-                  case 'annuel': price = isMinor ? Number(prices.tarif_annuel_enfant) : Number(prices.tarif_annuel_adulte); break;
-                  case '1_seance': price = isMinor ? Number(prices.tarif_1_seance_enfant) : Number(prices.tarif_1_seance_adulte); break;
-                  case '3_seances': price = isMinor ? Number(prices.tarif_3_seances_enfant) : Number(prices.tarif_3_seances_adulte); break;
-                  case '5_seances': price = isMinor ? Number(prices.tarif_5_seances_enfant) : Number(prices.tarif_5_seances_adulte); break;
-                  case '10_seances': price = isMinor ? Number(prices.tarif_10_seances_enfant) : Number(prices.tarif_10_seances_adulte); break;
-                  case '1_seance_ete': price = Number(prices.tarif_session_ete); break;
-                  case '3_seances_ete': price = Number(prices.tarif_session_ete) * 3; break;
-                  case '5_seances_ete': price = Number(prices.tarif_session_ete) * 5; break;
-                  case '10_seances_ete': price = Number(prices.tarif_session_ete) * 10; break;
-                  default: price = 0;
-                }
-                return subSum + (price || 0);
-              }, 0);
-            }
+              let studentTotal = 0;
+              if (activeSubs.length > 0) {
+                  if (p.custom_subscription_price !== null && p.custom_subscription_price !== undefined) {
+                      studentTotal = Number(p.custom_subscription_price);
+                  } else {
+                      studentTotal = activeSubs.reduce((subSum, sub) => {
+                          let price = 0;
+                          switch (sub.type) {
+                              case 'annuel': price = isMinor ? Number(prices.tarif_annuel_enfant) : Number(prices.tarif_annuel_adulte); break;
+                              case '1_seance': price = isMinor ? Number(prices.tarif_1_seance_enfant) : Number(prices.tarif_1_seance_adulte); break;
+                              case '3_seances': price = isMinor ? Number(prices.tarif_3_seances_enfant) : Number(prices.tarif_3_seances_adulte); break;
+                              case '5_seances': price = isMinor ? Number(prices.tarif_5_seances_enfant) : Number(prices.tarif_5_seances_adulte); break;
+                              case '10_seances': price = isMinor ? Number(prices.tarif_10_seances_enfant) : Number(prices.tarif_10_seances_adulte); break;
+                              case '1_seance_ete': price = Number(prices.tarif_session_ete); break;
+                              case '3_seances_ete': price = Number(prices.tarif_session_ete) * 3; break;
+                              case '5_seances_ete': price = Number(prices.tarif_session_ete) * 5; break;
+                              case '10_seances_ete': price = Number(prices.tarif_session_ete) * 10; break;
+                              default: price = 0;
+                          }
+                          return subSum + (price || 0);
+                      }, 0);
+                  }
+              }
 
-            return sum + studentTotal;
+              return sum + studentTotal;
           }, 0);
 
           const totalCuis = yearCreations.reduce((sum: number, c: any) => sum + (c.cost || 0), 0);
@@ -657,9 +667,10 @@ export default function AdminPage() {
             return acc;
           }, {} as Record<string, number>);
 
-          const paiementsByProfile = yearPaiements.reduce((acc, p) => {
-            acc[p.profile_id] = (acc[p.profile_id] || 0) + (p.montant || 0);
-            return acc;
+          // On utilise "allPaiements" (sans filtre de date) pour le calcul du solde réel
+          const paiementsByProfile = allPaiements.reduce((acc, p) => {
+              acc[p.profile_id] = (acc[p.profile_id] || 0) + (p.montant || 0);
+              return acc;
           }, {} as Record<string, number>);
 
           return profiles.map(p => {
@@ -671,28 +682,29 @@ export default function AdminPage() {
 
           // Calcul du prix des forfaits de l'élève
           let studentSubPrice = 0;
-          // On utilise le prix personnalisé s'il existe (geste commercial), sinon on calcule normal
-          if (p.custom_subscription_price !== null && p.custom_subscription_price !== undefined) {
-            studentSubPrice = Number(p.custom_subscription_price);
-          } else {
-            studentSubPrice = activeSubs.reduce((subSum: number, sub: any) => {
-              if (!prices) return subSum;
-              let price = 0;
-              const isMinor = p.is_minor;
-              switch (sub.type) {
-                case 'annuel': price = isMinor ? Number(prices.tarif_annuel_enfant) : Number(prices.tarif_annuel_adulte); break;
-                case '1_seance': price = isMinor ? Number(prices.tarif_1_seance_enfant) : Number(prices.tarif_1_seance_adulte); break;
-                case '3_seances': price = isMinor ? Number(prices.tarif_3_seances_enfant) : Number(prices.tarif_3_seances_adulte); break;
-                case '5_seances': price = isMinor ? Number(prices.tarif_5_seances_enfant) : Number(prices.tarif_5_seances_adulte); break;
-                case '10_seances': price = isMinor ? Number(prices.tarif_10_seances_enfant) : Number(prices.tarif_10_seances_adulte); break;
-                case '1_seance_ete': price = Number(prices.tarif_session_ete); break;
-                case '3_seances_ete': price = Number(prices.tarif_session_ete) * 3; break;
-                case '5_seances_ete': price = Number(prices.tarif_session_ete) * 5; break;
-                case '10_seances_ete': price = Number(prices.tarif_session_ete) * 10; break;
-                default: price = 0;
+          if (activeSubs.length > 0) {
+              if (p.custom_subscription_price !== null && p.custom_subscription_price !== undefined) {
+                  studentSubPrice = Number(p.custom_subscription_price);
+              } else {
+                  studentSubPrice = activeSubs.reduce((subSum: number, sub: any) => {
+                      if (!prices) return subSum;
+                      let price = 0;
+                      const isMinor = p.is_minor;
+                      switch (sub.type) {
+                          case 'annuel': price = isMinor ? Number(prices.tarif_annuel_enfant) : Number(prices.tarif_annuel_adulte); break;
+                          case '1_seance': price = isMinor ? Number(prices.tarif_1_seance_enfant) : Number(prices.tarif_1_seance_adulte); break;
+                          case '3_seances': price = isMinor ? Number(prices.tarif_3_seances_enfant) : Number(prices.tarif_3_seances_adulte); break;
+                          case '5_seances': price = isMinor ? Number(prices.tarif_5_seances_enfant) : Number(prices.tarif_5_seances_adulte); break;
+                          case '10_seances': price = isMinor ? Number(prices.tarif_10_seances_enfant) : Number(prices.tarif_10_seances_adulte); break;
+                          case '1_seance_ete': price = Number(prices.tarif_session_ete); break;
+                          case '3_seances_ete': price = Number(prices.tarif_session_ete) * 3; break;
+                          case '5_seances_ete': price = Number(prices.tarif_session_ete) * 5; break;
+                          case '10_seances_ete': price = Number(prices.tarif_session_ete) * 10; break;
+                          default: price = 0;
+                      }
+                      return subSum + (price || 0);
+                  }, 0);
               }
-              return subSum + (price || 0);
-            }, 0);
           }
 
           // Calcul du vrai solde dû pour l'année : Forfaits + Créations - Paiements
